@@ -50,7 +50,8 @@ async fn run() -> Result<(), GcalError> {
         Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, .. } => {
             let today = Local::now().date_naive();
             let event = CliMapper::map_add_command(
-                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today
+                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today,
+                None, // AI 統合は次ステップ
             )?;
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
