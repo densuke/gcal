@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 use crate::ai::types::AiEventParameters;
 use crate::error::GcalError;
 use crate::domain::{NewEvent, UpdateEvent};
@@ -122,7 +122,7 @@ impl CliMapper {
         let reminders_payload = if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
             parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
         } else if let Some(ref ai) = ai_params {
-            parse_ai_reminders(ai.reminder.as_deref().unwrap_or("popup:10m"))?
+            ai.reminder.as_deref().map(|r| parse_ai_reminders(r, Some(start_dt))).transpose()?.flatten()
         } else {
             None
         };
@@ -200,7 +200,7 @@ impl CliMapper {
         } else if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
             parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
         } else if let Some(ref ai) = ai_params {
-            ai.reminder.as_deref().map(parse_ai_reminders).transpose()?.flatten()
+            ai.reminder.as_deref().map(|r| parse_ai_reminders(r, start_dt)).transpose()?.flatten()
         } else {
             None
         };
@@ -274,13 +274,40 @@ fn parse_recurrence_args(r: crate::cli::RecurrenceArgs, today: NaiveDate) -> Res
     )
 }
 
-/// AI がカンマ区切りで返す reminder 文字列を EventReminders に変換するヘルパー
-fn parse_ai_reminders(s: &str) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
-    let items: Vec<String> = s.split(',')
+/// AI がカンマ区切りで返す reminder 文字列を EventReminders に変換するヘルパー。
+/// "popup:prev-HH:MM" 形式は start を使って分数に変換する。
+fn parse_ai_reminders(s: &str, start: Option<DateTime<Local>>) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
+    let resolved: Result<Vec<String>, GcalError> = s.split(',')
         .map(|r| r.trim().to_string())
         .filter(|r| !r.is_empty())
+        .map(|item| resolve_ai_reminder_item(&item, start))
         .collect();
-    parse_reminders(Some(items), None)
+    parse_reminders(Some(resolved?), None)
+}
+
+/// "method:prev-HH:MM" 形式を "method:Xm"（開始時刻から X 分前）に変換する。
+/// 非 prev 形式はそのまま返す。
+fn resolve_ai_reminder_item(item: &str, start: Option<DateTime<Local>>) -> Result<String, GcalError> {
+    if let Some((method, after_colon)) = item.split_once(':') {
+        if let Some(time_str) = after_colon.strip_prefix("prev-") {
+            let start_dt = start.ok_or_else(|| GcalError::ConfigError(
+                "「前日HH時」リマインダーには開始日時が必要です".to_string()
+            ))?;
+            if let Some((hh_str, mm_str)) = time_str.split_once(':') {
+                let hh: u32 = hh_str.parse().map_err(|_| GcalError::ConfigError(
+                    format!("無効な時刻指定: {}", time_str)
+                ))?;
+                let mm: u32 = mm_str.parse().map_err(|_| GcalError::ConfigError(
+                    format!("無効な時刻指定: {}", time_str)
+                ))?;
+                let start_mins = start_dt.hour() * 60 + start_dt.minute();
+                let prev_mins = hh * 60 + mm;
+                let total = start_mins + (24 * 60 - prev_mins);
+                return Ok(format!("{}:{}m", method, total));
+            }
+        }
+    }
+    Ok(item.to_string())
 }
 
 pub fn naive_date_to_utc_start(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
@@ -688,8 +715,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
     }
 
     #[test]
-    fn test_map_add_ai_no_reminder_defaults_to_popup_10m() {
-        // AI を使用、reminder フィールドなし → デフォルト popup:10m
+    fn test_map_add_ai_no_reminder_is_none() {
+        // AI を使用、reminder フィールドなし → None（カレンダーデフォルトに委ねる）
         let ai = AiEventParameters {
             title: Some("MTG".to_string()),
             date: Some("2026/3/20".to_string()),
@@ -704,11 +731,7 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             ai_params: Some(ai),
             ..make_add_input()
         }).unwrap();
-        let rem = event.reminders.unwrap();
-        assert!(!rem.use_default);
-        let overrides = rem.overrides.unwrap();
-        assert_eq!(overrides[0].method, "popup");
-        assert_eq!(overrides[0].minutes, 10);
+        assert!(event.reminders.is_none());
     }
 
     #[test]
@@ -769,6 +792,63 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         assert_eq!(overrides.len(), 2);
         assert_eq!(overrides[0].method, "popup");
         assert_eq!(overrides[0].minutes, 15);
+        assert_eq!(overrides[1].method, "popup");
+        assert_eq!(overrides[1].minutes, 120);
+    }
+
+    #[test]
+    fn test_resolve_ai_reminder_item_prev_format_08_30() {
+        // event 08:30, 前日19時 → (8*60+30)+(24-19)*60 = 510+300 = 810m
+        use chrono::TimeZone;
+        let start = chrono::Local.with_ymd_and_hms(2026, 3, 20, 8, 30, 0).unwrap();
+        let result = resolve_ai_reminder_item("popup:prev-19:00", Some(start)).unwrap();
+        assert_eq!(result, "popup:810m");
+    }
+
+    #[test]
+    fn test_resolve_ai_reminder_item_prev_format_10_00() {
+        // event 10:00, 前日17時 → (10*60+0)+(24-17)*60 = 600+420 = 1020m
+        use chrono::TimeZone;
+        let start = chrono::Local.with_ymd_and_hms(2026, 3, 1, 10, 0, 0).unwrap();
+        let result = resolve_ai_reminder_item("popup:prev-17:00", Some(start)).unwrap();
+        assert_eq!(result, "popup:1020m");
+    }
+
+    #[test]
+    fn test_resolve_ai_reminder_item_plain_passthrough() {
+        // "popup:30m" は変換なしでそのまま返る
+        let result = resolve_ai_reminder_item("popup:30m", None).unwrap();
+        assert_eq!(result, "popup:30m");
+    }
+
+    #[test]
+    fn test_resolve_ai_reminder_item_prev_without_start_returns_error() {
+        // start が None のとき prev 形式はエラー
+        let result = resolve_ai_reminder_item("popup:prev-19:00", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_map_add_ai_reminder_prev_day_format() {
+        // "popup:prev-19:00" + start 08:30 → 810m, "popup:2h" → 120m
+        let ai = AiEventParameters {
+            title: Some("半日勤務(午後有休)".to_string()),
+            date: Some("2026/2/27".to_string()),
+            start: Some("08:30".to_string()),
+            end: Some("+4h".to_string()),
+            location: None,
+            repeat_rule: None,
+            reminder: Some("popup:prev-19:00,popup:2h".to_string()),
+            calendar: None,
+        };
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
+        let overrides = event.reminders.unwrap().overrides.unwrap();
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides[0].method, "popup");
+        assert_eq!(overrides[0].minutes, 810);
         assert_eq!(overrides[1].method, "popup");
         assert_eq!(overrides[1].minutes, 120);
     }

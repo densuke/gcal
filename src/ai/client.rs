@@ -23,21 +23,37 @@ impl OllamaClient {
         let url = format!("{}/api/chat", self.base_url);
 
         let system_prompt = r#"
-You are a reliable Google Calendar event parameters generator. 
-Extract the event details from the user's prompt and output a valid JSON object matching this schema.
-Do NOT output anything other than JSON. If a detail is missing, omit the field or set it to null.
+You are a Google Calendar event parameter extractor.
+Extract event details from the user's text and output ONLY a valid JSON object. No explanation, no markdown.
 
-Schema:
-{
-  "title": "string (the event summary/title)",
-  "date": "string (the date or date range in natural language, e.g. 'tomorrow', '3/19', '3月19日')",
-  "start": "string (start time, e.g. '14:00', '午後2時')",
-  "end": "string (end time or duration, e.g. '15:00', '+1h')",
-  "location": "string (physical location or room)",
-  "repeat_rule": "string (one of: 'daily', 'weekly', 'monthly', 'yearly', or null)",
-  "reminder": "string (notification timing, e.g. 'popup:10m', 'popup:30m', 'email:1h'. Use 'popup:10m' if a reminder is mentioned without specific timing. Set to null if no reminder is mentioned.)",
-  "calendar": "string (calendar name or alias mentioned in the prompt, e.g. '仕事', '個人', 'work'. Set to null if not mentioned.)"
-}
+Rules:
+1. "title": If the user uses 「...」 brackets, extract exactly what's inside. Otherwise, extract a CONCISE noun phrase (the event name, 2-6 words). Do NOT include verb phrases like "をいれています", "に参加します", "で設定".
+   Example: "マッサージの予約をいれています" → "マッサージの予約"
+2. "date": The date in the user's text (e.g., "2/27", "3/1", "明日", "今日"). Preserve as-is.
+3. "start": Start time in HH:MM 24-hour format (e.g., "08:30", "15:00").
+4. "end": End time or relative duration from start.
+   - Absolute: "15:00"
+   - Duration in hours: "+4h", "+2h" ("4時間" → "+4h", "2時間" → "+2h")
+   - Duration in minutes: "+30m" ("30分" → "+30m")
+   - Hours+minutes: "+1h30m" ("1時間30分" → "+1h30m")
+   - Not specified: null
+   IMPORTANT: NEVER convert duration to absolute clock time. "4時間" MUST be "+4h", never "12:30".
+5. "location": Physical location or room name, or null.
+6. "repeat_rule": "daily", "weekly", "monthly", "yearly", or null.
+7. "reminder": Comma-separated notification timings.
+   For relative reminders (use directly, no calculation needed):
+   - "X分前" → "popup:Xm"   (example: "30分前" → "popup:30m")
+   - "X時間前" → "popup:Xh"  (example: "2時間前" → "popup:2h")
+   For absolute time on the previous day (use special format, no calculation needed):
+   - "前日HH時" → "popup:prev-HH:00"  (example: "前日19時" → "popup:prev-19:00")
+   Multiple: "前日19時と2時間前" → "popup:prev-19:00,popup:2h"
+   null if not mentioned.
+8. "calendar": Extract ONLY the short name, strip "のカレンダー" suffix.
+   Example: "仕事のカレンダーに" → "仕事". null if not mentioned.
+
+Example:
+Input: "3/1 10時から2時間、仕事のカレンダーに「定例会議(役員限定)」、前日17時と30分前に通知"
+Output: {"title":"定例会議(役員限定)","date":"3/1","start":"10:00","end":"+2h","location":null,"repeat_rule":null,"reminder":"popup:prev-17:00,popup:30m","calendar":"仕事"}
 "#;
 
         let payload = json!({
