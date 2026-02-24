@@ -64,6 +64,43 @@ pub enum Commands {
         /// 例: "今日 12:00", "今日 12:00-13:00", "今日 12:00+1h"
         #[arg(long, conflicts_with_all = ["start", "end"])]
         date: Option<String>,
+        
+        /// 繰り返し指定をクリア
+        #[arg(long)]
+        clear_repeat: bool,
+        /// 通知をクリア
+        #[arg(long)]
+        clear_reminders: bool,
+        /// 場所をクリア
+        #[arg(long)]
+        clear_location: bool,
+        
+        /// 繰り返し設定: daily, weekly, monthly, yearly
+        #[arg(long, value_parser = ["daily", "weekly", "monthly", "yearly"])]
+        repeat: Option<String>,
+        /// 繰り返しの間隔
+        #[arg(long, requires = "repeat")]
+        every: Option<u32>,
+        /// 繰り返しの曜日指定 (カンマ区切り)
+        #[arg(long, requires = "repeat")]
+        on: Option<String>,
+        /// 繰り返しの終了期日 (YYYY-MM-DD or タイムスタンプ)
+        #[arg(long, requires = "repeat", conflicts_with = "count")]
+        until: Option<String>,
+        /// 繰り返しの回数
+        #[arg(long, requires = "repeat", conflicts_with = "until")]
+        count: Option<u32>,
+        /// RRULE生指定 (複数可)
+        #[arg(long, conflicts_with = "repeat")]
+        recur: Option<Vec<String>>,
+        
+        /// リマインダー通知 (複数可) 例: popup:10m, email:1d
+        #[arg(long)]
+        reminder: Option<Vec<String>>,
+        /// リマインダーのプリセット: default または none
+        #[arg(long, conflicts_with = "reminder", value_parser = ["default", "none"])]
+        reminders: Option<String>,
+        
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
@@ -93,8 +130,118 @@ pub enum Commands {
         /// 終了日時（省略時: 開始 +1時間、相対指定可: "+1h", "+30m"、--date と排他）
         #[arg(long, conflicts_with = "date")]
         end: Option<String>,
+        
+        /// 繰り返し設定: daily, weekly, monthly, yearly
+        #[arg(long, value_parser = ["daily", "weekly", "monthly", "yearly"])]
+        repeat: Option<String>,
+        /// 繰り返しの間隔
+        #[arg(long, requires = "repeat")]
+        every: Option<u32>,
+        /// 繰り返しの曜日指定 (カンマ区切り)
+        #[arg(long, requires = "repeat")]
+        on: Option<String>,
+        /// 繰り返しの終了期日 (YYYY-MM-DD or タイムスタンプ)
+        #[arg(long, requires = "repeat", conflicts_with = "count")]
+        until: Option<String>,
+        /// 繰り返しの回数
+        #[arg(long, requires = "repeat", conflicts_with = "until")]
+        count: Option<u32>,
+        /// RRULE生指定 (複数可)
+        #[arg(long, conflicts_with = "repeat")]
+        recur: Option<Vec<String>>,
+        
+        /// リマインダー通知 (複数可) 例: popup:10m, email:1d
+        #[arg(long)]
+        reminder: Option<Vec<String>>,
+        /// リマインダーのプリセット: default または none
+        #[arg(long, conflicts_with = "reminder", value_parser = ["default", "none"])]
+        reminders: Option<String>,
+        
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_add_repeat_args() {
+        let args = vec![
+            "gcal",
+            "add",
+            "Test Event",
+            "--repeat", "weekly",
+            "--every", "2",
+            "--on", "mon,wed",
+            "--until", "2026-12-31",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Commands::Add { repeat, every, on, until, .. } = cli.command {
+            assert_eq!(repeat.as_deref(), Some("weekly"));
+            assert_eq!(every, Some(2));
+            assert_eq!(on.as_deref(), Some("mon,wed"));
+            assert_eq!(until.as_deref(), Some("2026-12-31"));
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_reminder_args() {
+        let args = vec![
+            "gcal",
+            "add",
+            "Test Event",
+            "--reminder", "popup:10m",
+            "--reminder", "email:1d",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Commands::Add { reminder, reminders, .. } = cli.command {
+            assert_eq!(reminder, Some(vec!["popup:10m".to_string(), "email:1d".to_string()]));
+            assert_eq!(reminders, None);
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_reminders_preset() {
+        let args = vec![
+            "gcal",
+            "add",
+            "Test Event",
+            "--reminders", "default",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Commands::Add { reminder, reminders, .. } = cli.command {
+            assert_eq!(reminder, None);
+            assert_eq!(reminders.as_deref(), Some("default"));
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_update_clear_flags() {
+        let args = vec![
+            "gcal",
+            "update",
+            "evt_id",
+            "--clear-repeat",
+            "--clear-reminders",
+            "--clear-location",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Commands::Update { clear_repeat, clear_reminders, .. } = cli.command {
+            assert!(clear_repeat);
+            assert!(clear_reminders);
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+}
+

@@ -208,6 +208,8 @@ mod tests {
             calendar_id: "primary".to_string(),
             start,
             end,
+            recurrence: None,
+            reminders: None,
         };
 
         let mut out = Vec::new();
@@ -237,6 +239,8 @@ mod tests {
             title: Some("更新後タイトル".to_string()),
             start: None,
             end: None,
+            recurrence: None,
+            reminders: None,
         };
 
         let mut out = Vec::new();

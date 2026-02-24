@@ -47,7 +47,7 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Add { title, date, start, end, calendar } => {
+        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
             let today = Local::now().date_naive();
             let (start_dt, end_dt) = if let Some(d) = date {
                 parse_datetime_range_expr(&d, today)?
@@ -64,22 +64,38 @@ async fn run() -> Result<(), GcalError> {
                 };
                 (start_dt, end_dt)
             };
+
+            let recurrence_payload = gcal::date_parser::parse_recurrence(
+                repeat.as_deref(),
+                every,
+                on.as_deref(),
+                until.as_deref(),
+                count,
+                recur,
+            )?;
+            let reminders_payload = gcal::date_parser::parse_reminders(
+                reminder,
+                reminders.as_deref(),
+            )?;
+
             let event = NewEvent {
                 summary: title,
                 calendar_id: calendar,
                 start: start_dt,
                 end: end_dt,
+                recurrence: recurrence_payload,
+                reminders: reminders_payload,
             };
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar } => {
-            // --title / --start・--end / --date のいずれも指定されていない場合はエラー
-            if title.is_none() && start.is_none() && date.is_none() {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
+            // --title / --start・--end / --date のいずれも指定されていない、かつ更新フラグもない場合はエラー
+            if title.is_none() && start.is_none() && date.is_none() && repeat.is_none() && recur.is_none() && reminder.is_none() && reminders.is_none() && !clear_repeat && !clear_reminders && !clear_location {
                 return Err(GcalError::ConfigError(
-                    "--title / --start・--end / --date のいずれかを指定してください".to_string(),
+                    "更新する項目 (--title / --start / --date / --repeat / --reminder など) を指定してください".to_string(),
                 ));
             }
             let today = Local::now().date_naive();
@@ -96,12 +112,38 @@ async fn run() -> Result<(), GcalError> {
                     _ => (None, None),
                 }
             };
+
+            let mut recurrence_payload = gcal::date_parser::parse_recurrence(
+                repeat.as_deref(),
+                every,
+                on.as_deref(),
+                until.as_deref(),
+                count,
+                recur,
+            )?;
+            if clear_repeat {
+                recurrence_payload = Some(vec![]);
+            }
+
+            let mut reminders_payload = gcal::date_parser::parse_reminders(
+                reminder,
+                reminders.as_deref(),
+            )?;
+            if clear_reminders {
+                reminders_payload = Some(gcal::gcal_api::models::EventReminders {
+                    use_default: false,
+                    overrides: Some(vec![]),
+                });
+            }
+
             let event = UpdateEvent {
                 event_id,
                 calendar_id: calendar,
                 title,
                 start: start_dt,
                 end: end_dt,
+                recurrence: recurrence_payload,
+                reminders: reminders_payload,
             };
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();

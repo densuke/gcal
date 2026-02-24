@@ -62,12 +62,13 @@ gcal delete <event_id>             # 予定の削除
 - 対象カレンダーに新しいイベントを作成する（`/calendars/{id}/events` への POST リクエスト）
 - 必須引数: イベント名 (`title`)
 - 時間の指定オプション: `--date` (範囲指定), `--start`, `--end` を利用して日時を柔軟に設定可能
+- 場所の指定: `--location`
 - 繰り返し・通知の指定（後述の「高度な入力パース」参照）
 
 **`gcal update`**
 - 既存のイベントを更新する（`/calendars/{id}/events/{eventId}` への PUT リクエスト）
-- オプション: `--title`, `--start`, `--end`, `--date` を用いて一部または全てを更新可能
-- 繰り返し・通知の更新: `--clear-repeat`, `--clear-reminders` によるクリアや、新たなルールの適用が可能
+- オプション: `--title`, `--start`, `--end`, `--date`, `--location` を用いて一部または全てを更新可能
+- 付随情報のクリア: `--clear-location`, `--clear-repeat`, `--clear-reminders` メディアクリアや新たなルール適用が可能
 - 更新対象のイベントIDを必須とする
 
 **`gcal delete`**
@@ -87,9 +88,16 @@ CLIに入力される自然言語の日付や相対時間を解析し、`DateRan
 
 ---
 
-## 高度な入力パース (v0.3.x追加予定)
+## 高度な入力パース
 
-### 繰り返し予定 (Recurrence)
+### 場所の指定 (Location) [v0.4.0予定]
+イベントの開催場所（文字列）を保存するためのオプションです。
+- **場所の指定**:
+  - `--location <text>` (例: `--location "会議室A"`)
+- **更新時のクリア**:
+  - `--clear-location` (既存予定から場所情報を削除)
+
+### 繰り返し予定 (Recurrence) [v0.3.3追加]
 Google Calendar の `recurrence` (RRULE形式の配列) に対し、ユーザーフレンドリーなDSLと生指定（エスケープハッチ）の2層構造を提供します。
 - **シンプルなDSL**:
   - `--repeat <daily|weekly|monthly|yearly>`
@@ -101,7 +109,7 @@ Google Calendar の `recurrence` (RRULE形式の配列) に対し、ユーザー
 - **更新時のクリア**:
   - `--clear-repeat` (既存予定から繰り返しを削除)
 
-### 通知・リマインダー (Reminders)
+### 通知・リマインダー (Reminders) [v0.3.3追加]
 Google Calendar の `reminders` オブジェクトに対して、複数条件を直感的に指定できるようにします。
 - **通知オーバーライド指定 (`--reminder`)**:
   - `メソッド:オフセット` フォーマットで指定（例: `--reminder popup:10m`, `--reminder email:1d`）

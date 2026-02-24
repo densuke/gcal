@@ -1,5 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EventReminderOverride {
+    pub method: String,
+    pub minutes: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EventReminders {
+    pub use_default: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<Vec<EventReminderOverride>>,
+}
+
+
 /// カレンダーリスト API レスポンス
 #[derive(Debug, Deserialize)]
 pub struct CalendarListResponse {
@@ -41,6 +57,10 @@ pub struct CreateEventRequest {
     pub summary: String,
     pub start: EventTimeSpec,
     pub end: EventTimeSpec,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reminders: Option<EventReminders>,
 }
 
 /// イベント時刻指定（RFC3339 + IANA タイムゾーン名）
@@ -66,4 +86,8 @@ pub struct PatchEventRequest {
     pub start: Option<EventTimeSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end: Option<EventTimeSpec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reminders: Option<EventReminders>,
 }

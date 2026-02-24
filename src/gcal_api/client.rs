@@ -140,6 +140,8 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                 date_time: event.end.to_rfc3339(),
                 time_zone: tz,
             },
+            recurrence: event.recurrence,
+            reminders: event.reminders,
         };
 
         let resp = self
@@ -178,6 +180,8 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                 date_time: dt.to_rfc3339(),
                 time_zone: tz,
             }),
+            recurrence: event.recurrence,
+            reminders: event.reminders,
         };
 
         let resp = self
@@ -445,6 +449,8 @@ mod tests {
             calendar_id: "primary".to_string(),
             start,
             end,
+            recurrence: None,
+            reminders: None,
         };
         let id = client.create_event(event).await.unwrap();
         assert_eq!(id, "created-event-id-123");
@@ -472,6 +478,8 @@ mod tests {
             calendar_id: "primary".to_string(),
             start,
             end,
+            recurrence: None,
+            reminders: None,
         };
         let result = client.create_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 401, .. })));
@@ -499,6 +507,8 @@ mod tests {
             calendar_id: "primary".to_string(),
             start,
             end,
+            recurrence: None,
+            reminders: None,
         };
         let result = client.create_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 400, .. })));
@@ -527,6 +537,8 @@ mod tests {
             title: Some("新しいタイトル".to_string()),
             start: None,
             end: None,
+            recurrence: None,
+            reminders: None,
         };
         client.update_event(event).await.unwrap();
     }
@@ -554,6 +566,8 @@ mod tests {
             title: None,
             start: Some(start),
             end: Some(end),
+            recurrence: None,
+            reminders: None,
         };
         client.update_event(event).await.unwrap();
     }
@@ -577,6 +591,8 @@ mod tests {
             title: Some("test".to_string()),
             start: None,
             end: None,
+            recurrence: None,
+            reminders: None,
         };
         let result = client.update_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));

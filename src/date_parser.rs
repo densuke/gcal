@@ -435,6 +435,119 @@ pub fn parse_datetime_range_expr(
 }
 
 // ============================================================
+// Recurrence & Reminders Parsing 
+// ============================================================
+
+pub fn parse_recurrence(
+    repeat: Option<&str>,
+    every: Option<u32>,
+    on: Option<&str>,
+    until: Option<&str>,
+    count: Option<u32>,
+    recur: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, GcalError> {
+    if let Some(rlist) = recur {
+        return Ok(Some(rlist));
+    }
+    
+    let freq = match repeat {
+        Some("daily") => "DAILY",
+        Some("weekly") => "WEEKLY",
+        Some("monthly") => "MONTHLY",
+        Some("yearly") => "YEARLY",
+        Some(other) => return Err(GcalError::ConfigError(format!("未検証のrepeat値: {}", other))),
+        None => return Ok(None),
+    };
+
+    let mut parts = vec![format!("FREQ={}", freq)];
+
+    if let Some(interval) = every {
+        parts.push(format!("INTERVAL={}", interval));
+    }
+
+    if let Some(days) = on {
+        // e.g., "mon,wed" -> "MO,WE"
+        let mapped: Vec<String> = days.split(',').map(|d| {
+            match d.trim().to_lowercase().as_str() {
+                "mon" | "monday" | "月" => "MO".to_string(),
+                "tue" | "tuesday" | "火" => "TU".to_string(),
+                "wed" | "wednesday" | "水" => "WE".to_string(),
+                "thu" | "thursday" | "木" => "TH".to_string(),
+                "fri" | "friday" | "金" => "FR".to_string(),
+                "sat" | "saturday" | "土" => "SA".to_string(),
+                "sun" | "sunday" | "日" => "SU".to_string(),
+                other => other.to_uppercase(),
+            }
+        }).collect();
+        parts.push(format!("BYDAY={}", mapped.join(",")));
+    }
+
+    if let Some(u) = until {
+        let today = chrono::Local::now().date_naive();
+        let range = parse_date_expr(u, today)?;
+        let date_str = range.from.format("%Y%m%d").to_string();
+        // Append T235959Z for accurate until handling 
+        parts.push(format!("UNTIL={}T235959Z", date_str));
+    } else if let Some(c) = count {
+        parts.push(format!("COUNT={}", c));
+    }
+
+    let rrule = format!("RRULE:{}", parts.join(";"));
+    Ok(Some(vec![rrule]))
+}
+
+pub fn parse_reminders(
+    reminder: Option<Vec<String>>,
+    reminders: Option<&str>,
+) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
+    if let Some(preset) = reminders {
+        if preset == "default" {
+            return Ok(Some(crate::gcal_api::models::EventReminders {
+                use_default: true,
+                overrides: None,
+            }));
+        } else if preset == "none" {
+            return Ok(Some(crate::gcal_api::models::EventReminders {
+                use_default: false,
+                overrides: Some(vec![]),
+            }));
+        } else {
+            return Err(GcalError::ConfigError(format!("不明なremindersプリセット: {}", preset)));
+        }
+    }
+
+    if let Some(list) = reminder {
+        let mut overrides = Vec::new();
+        for item in list {
+            let parts: Vec<&str> = item.split(':').collect();
+            if parts.len() != 2 {
+                return Err(GcalError::ConfigError(format!("無効なreminder指定: {}", item)));
+            }
+            let method = parts[0].to_string();
+            let time_str = parts[1];
+            
+            let minutes = if let Some(m) = strip_suffix_u64(time_str, "m") {
+                m as i32
+            } else if let Some(h) = strip_suffix_u64(time_str, "h") {
+                (h * 60) as i32
+            } else if let Some(d) = strip_suffix_u64(time_str, "d") {
+                (d * 24 * 60) as i32
+            } else {
+                return Err(GcalError::ConfigError(format!("無効な時間指定: {}", time_str)));
+            };
+
+            overrides.push(crate::gcal_api::models::EventReminderOverride { method, minutes });
+        }
+        return Ok(Some(crate::gcal_api::models::EventReminders {
+            use_default: false,
+            overrides: Some(overrides),
+        }));
+    }
+
+    Ok(None)
+}
+
+// ============================================================
 // テスト
 // ============================================================
 
@@ -823,6 +936,20 @@ mod tests {
         assert_eq!(end, local_dt(2026, 2, 25, 15, 0));
     }
 
+    #[test]
+    fn test_end_expr_absolute_same_day() {
+        let dt1 = local_dt(2026, 2, 24, 13, 0);
+        let dt2 = parse_end_expr("今日 18:00", dt1, today()).unwrap();
+        assert_eq!(dt2, local_dt(2026, 2, 24, 18, 0));
+    }
+
+    #[test]
+    fn test_end_expr_absolute_different_day() {
+        let dt1 = local_dt(2026, 2, 24, 10, 0);
+        let dt2 = parse_end_expr("明日 10:00", dt1, today()).unwrap();
+        assert_eq!(dt2, local_dt(2026, 2, 25, 10, 0));
+    }
+
     // --- parse_datetime_range_expr のテスト ---
 
     #[test]
@@ -863,5 +990,59 @@ mod tests {
     #[test]
     fn test_range_no_space_returns_error() {
         assert!(parse_datetime_range_expr("9:30", today()).is_err());
+    }
+
+    // --- TDD: parse_recurrence tests (Failing) ---
+    #[test]
+    fn test_parse_recurrence_daily() {
+        let rrule = super::parse_recurrence(Some("daily"), None, None, None, None, None).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=DAILY"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_weekly_with_interval_and_count() {
+        let rrule = super::parse_recurrence(Some("weekly"), Some(2), Some("mon,wed"), None, Some(10), None).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_monthly_with_until() {
+        let rrule = super::parse_recurrence(Some("monthly"), None, None, Some("2026/12/31"), None, None).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=MONTHLY;UNTIL=20261231T235959Z"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_raw_rrule() {
+        let raw = vec!["RRULE:FREQ=YEARLY".to_string()];
+        let rrule = super::parse_recurrence(None, None, None, None, None, Some(raw)).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=YEARLY"]);
+    }
+
+    // --- TDD: parse_reminders tests (Failing) ---
+    #[test]
+    fn test_parse_reminders_default() {
+        let rems = super::parse_reminders(None, Some("default")).unwrap().unwrap();
+        assert!(rems.use_default);
+        assert!(rems.overrides.is_none());
+    }
+
+    #[test]
+    fn test_parse_reminders_none() {
+        let rems = super::parse_reminders(None, Some("none")).unwrap().unwrap();
+        assert!(!rems.use_default);
+        assert_eq!(rems.overrides.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_parse_reminders_custom() {
+        let overrides = vec!["popup:10m".to_string(), "email:1d".to_string()];
+        let rems = super::parse_reminders(Some(overrides), None).unwrap().unwrap();
+        assert!(!rems.use_default);
+        let o = rems.overrides.unwrap();
+        assert_eq!(o.len(), 2);
+        assert_eq!(o[0].method, "popup");
+        assert_eq!(o[0].minutes, 10);
+        assert_eq!(o[1].method, "email");
+        assert_eq!(o[1].minutes, 1440);
     }
 }
