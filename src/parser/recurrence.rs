@@ -1,3 +1,5 @@
+use chrono::NaiveDate;
+
 use crate::error::GcalError;
 use crate::parser::datetime::parse_date_expr;
 
@@ -8,6 +10,7 @@ pub fn parse_recurrence(
     until: Option<&str>,
     count: Option<u32>,
     recur: Option<Vec<String>>,
+    today: NaiveDate,
 ) -> Result<Option<Vec<String>>, GcalError> {
     if let Some(rlist) = recur {
         return Ok(Some(rlist));
@@ -46,7 +49,6 @@ pub fn parse_recurrence(
     }
 
     if let Some(u) = until {
-        let today = chrono::Local::now().date_naive();
         let range = parse_date_expr(u, today)?;
         let date_str = range.from.format("%Y%m%d").to_string();
         // Append T235959Z for accurate until handling 
@@ -63,28 +65,74 @@ pub fn parse_recurrence(
 mod tests {
     use super::*;
 
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
+    }
+
+    #[test]
+    fn test_parse_recurrence_none_returns_none() {
+        let result = parse_recurrence(None, None, None, None, None, None, today()).unwrap();
+        assert!(result.is_none());
+    }
+
     #[test]
     fn test_parse_recurrence_daily() {
-        let rrule = parse_recurrence(Some("daily"), None, None, None, None, None).unwrap().unwrap();
+        let rrule = parse_recurrence(Some("daily"), None, None, None, None, None, today()).unwrap().unwrap();
         assert_eq!(rrule, vec!["RRULE:FREQ=DAILY"]);
     }
 
     #[test]
+    fn test_parse_recurrence_weekly() {
+        let rrule = parse_recurrence(Some("weekly"), None, None, None, None, None, today()).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=WEEKLY"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_monthly() {
+        let rrule = parse_recurrence(Some("monthly"), None, None, None, None, None, today()).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=MONTHLY"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_yearly() {
+        let rrule = parse_recurrence(Some("yearly"), None, None, None, None, None, today()).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=YEARLY"]);
+    }
+
+    #[test]
     fn test_parse_recurrence_weekly_with_interval_and_count() {
-        let rrule = parse_recurrence(Some("weekly"), Some(2), Some("mon,wed"), None, Some(10), None).unwrap().unwrap();
+        let rrule = parse_recurrence(Some("weekly"), Some(2), Some("mon,wed"), None, Some(10), None, today()).unwrap().unwrap();
         assert_eq!(rrule, vec!["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10"]);
     }
 
     #[test]
     fn test_parse_recurrence_monthly_with_until() {
-        let rrule = parse_recurrence(Some("monthly"), None, None, Some("2026/12/31"), None, None).unwrap().unwrap();
+        let rrule = parse_recurrence(Some("monthly"), None, None, Some("2026/12/31"), None, None, today()).unwrap().unwrap();
         assert_eq!(rrule, vec!["RRULE:FREQ=MONTHLY;UNTIL=20261231T235959Z"]);
     }
 
     #[test]
     fn test_parse_recurrence_raw_rrule() {
         let raw = vec!["RRULE:FREQ=YEARLY".to_string()];
-        let rrule = parse_recurrence(None, None, None, None, None, Some(raw)).unwrap().unwrap();
+        let rrule = parse_recurrence(None, None, None, None, None, Some(raw), today()).unwrap().unwrap();
         assert_eq!(rrule, vec!["RRULE:FREQ=YEARLY"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_unknown_repeat_returns_error() {
+        let result = parse_recurrence(Some("hourly"), None, None, None, None, None, today());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_recurrence_byday_japanese() {
+        let rrule = parse_recurrence(Some("weekly"), None, Some("月,水,金"), None, None, None, today()).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"]);
+    }
+
+    #[test]
+    fn test_parse_recurrence_interval_only() {
+        let rrule = parse_recurrence(Some("daily"), Some(3), None, None, None, None, today()).unwrap().unwrap();
+        assert_eq!(rrule, vec!["RRULE:FREQ=DAILY;INTERVAL=3"]);
     }
 }

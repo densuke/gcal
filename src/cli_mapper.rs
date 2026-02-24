@@ -75,6 +75,7 @@ impl CliMapper {
             until.as_deref(),
             count,
             recur,
+            today,
         )?;
         // reminders: CLI --reminder/--reminders が優先。
         // AI を使用した場合は AI の reminder または デフォルト popup:10m を適用。
@@ -180,6 +181,7 @@ impl CliMapper {
             until.as_deref(),
             count,
             recur,
+            today,
         )?;
         if clear_repeat {
             recurrence_payload = Some(vec![]);
