@@ -4,12 +4,13 @@ use clap::Parser;
 use gcal::ai::client::OllamaClient;
 use gcal::ai::types::AiEventParameters;
 use gcal::output::{write_new_event_dry_run, write_update_event_dry_run};
-use gcal::app::{handle_list_aliases, handle_remove_alias, handle_set_alias, App};
+use gcal::alias_handler::{handle_list_aliases, handle_remove_alias, handle_set_alias};
+use gcal::app::App;
 use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{CalendarSubcommands, Cli, Commands};
-use gcal::cli_mapper::CliMapper;
+use gcal::cli_mapper::{AddCommandInput, UpdateCommandInput, CliMapper};
 use gcal::config::{AiConfig, Config, FileTokenStore};
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
@@ -66,31 +67,29 @@ async fn run() -> Result<(), GcalError> {
             }
         }
 
-        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, yes, .. } => {
+        Commands::Add { title, date, start, end, location, calendar, recurrence, reminder_args, ai_args } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
             // calendar: CLI > AI > "primary"、その後エイリアス解決
             let raw_calendar = calendar
                 .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
                 .unwrap_or_else(|| "primary".to_string());
             let calendar_id = resolve_calendar(&config_path, &raw_calendar);
-            let event = CliMapper::map_add_command(
-                title, date, start, end, calendar_id, repeat, every, on, until, count, recur, reminder, reminders, location, today,
-                ai_params,
-            )?;
-            if dry_run {
+
+            let event = CliMapper::map_add_command(AddCommandInput {
+                title, date, start, end, calendar: calendar_id, location, recurrence, reminder_args, today, ai_params
+            })?;
+            if ai_args.dry_run {
                 let mut out = std::io::stdout();
                 write_new_event_dry_run(&event, &mut out)?;
                 return Ok(());
             }
             // AI 使用時は登録内容を表示して確認を求める（--yes でスキップ）
-            if used_ai && !yes {
+            if used_ai && !ai_args.yes {
                 let mut out = std::io::stdout();
                 write_new_event_dry_run(&event, &mut out)?;
-                let answer = prompt("この内容で登録しますか? [y/N]: ")?;
-                if answer.to_lowercase() != "y" {
-                    println!("キャンセルしました");
+                if !confirm_or_cancel("この内容で登録しますか? [y/N]: ")? {
                     return Ok(());
                 }
             }
@@ -99,31 +98,29 @@ async fn run() -> Result<(), GcalError> {
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, yes, .. } => {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, ai_args } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
             // calendar: CLI > AI > "primary"、その後エイリアス解決
             let raw_calendar = calendar
                 .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
                 .unwrap_or_else(|| "primary".to_string());
             let calendar_id = resolve_calendar(&config_path, &raw_calendar);
-            let event = CliMapper::map_update_command(
-                event_id, title, date, start, end, calendar_id, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today,
-                ai_params,
-            )?;
-            if dry_run {
+
+            let event = CliMapper::map_update_command(UpdateCommandInput {
+                event_id, calendar: calendar_id, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
+            })?;
+            if ai_args.dry_run {
                 let mut out = std::io::stdout();
                 write_update_event_dry_run(&event, &mut out)?;
                 return Ok(());
             }
             // AI 使用時は更新内容を表示して確認を求める（--yes でスキップ）
-            if used_ai && !yes {
+            if used_ai && !ai_args.yes {
                 let mut out = std::io::stdout();
                 write_update_event_dry_run(&event, &mut out)?;
-                let answer = prompt("この内容で更新しますか? [y/N]: ")?;
-                if answer.to_lowercase() != "y" {
-                    println!("キャンセルしました");
+                if !confirm_or_cancel("この内容で更新しますか? [y/N]: ")? {
                     return Ok(());
                 }
             }
@@ -135,12 +132,10 @@ async fn run() -> Result<(), GcalError> {
         Commands::Delete { event_id, force, calendar } => {
             let calendar_id = resolve_calendar(&config_path, &calendar);
             if !force {
-                let answer = prompt(&format!(
+                if !confirm_or_cancel(&format!(
                     "イベント (ID: {}) を削除しますか? [y/N]: ",
                     event_id
-                ))?;
-                if answer.to_lowercase() != "y" {
-                    println!("キャンセルしました");
+                ))? {
                     return Ok(());
                 }
             }
@@ -264,4 +259,14 @@ fn prompt(message: &str) -> Result<String, GcalError> {
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).map_err(GcalError::IoError)?;
     Ok(input.trim().to_string())
+}
+
+/// y/N プロンプトを表示し、y なら true、それ以外は "キャンセルしました" を表示して false を返す
+fn confirm_or_cancel(message: &str) -> Result<bool, GcalError> {
+    let answer = prompt(message)?;
+    if answer.to_lowercase() != "y" {
+        println!("キャンセルしました");
+        return Ok(false);
+    }
+    Ok(true)
 }

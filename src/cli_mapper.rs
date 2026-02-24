@@ -5,28 +5,82 @@ use crate::domain::{NewEvent, UpdateEvent};
 use crate::parser::{parse_datetime_expr, parse_datetime_range_expr, parse_end_expr, resolve_event_range};
 use crate::parser::{parse_recurrence, parse_reminders};
 
+pub struct AddCommandInput {
+    pub title: Option<String>,
+    pub date: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub calendar: String,
+    pub location: Option<String>,
+    pub recurrence: crate::cli::RecurrenceArgs,
+    pub reminder_args: crate::cli::ReminderArgs,
+    pub today: NaiveDate,
+    pub ai_params: Option<AiEventParameters>,
+}
+
+impl Default for AddCommandInput {
+    fn default() -> Self {
+        Self {
+            title: None,
+            date: None,
+            start: None,
+            end: None,
+            calendar: "primary".to_string(),
+            location: None,
+            recurrence: Default::default(),
+            reminder_args: Default::default(),
+            today: NaiveDate::from_ymd_opt(2026, 2, 24).unwrap(),
+            ai_params: None,
+        }
+    }
+}
+
+pub struct UpdateCommandInput {
+    pub event_id: String,
+    pub calendar: String,
+    pub title: Option<String>,
+    pub date: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub clear_repeat: bool,
+    pub clear_reminders: bool,
+    pub clear_location: bool,
+    pub location: Option<String>,
+    pub recurrence: crate::cli::RecurrenceArgs,
+    pub reminder_args: crate::cli::ReminderArgs,
+    pub today: NaiveDate,
+    pub ai_params: Option<AiEventParameters>,
+}
+
+impl Default for UpdateCommandInput {
+    fn default() -> Self {
+        Self {
+            event_id: "".to_string(),
+            calendar: "primary".to_string(),
+            title: None,
+            date: None,
+            start: None,
+            end: None,
+            clear_repeat: false,
+            clear_reminders: false,
+            clear_location: false,
+            location: None,
+            recurrence: Default::default(),
+            reminder_args: Default::default(),
+            today: NaiveDate::from_ymd_opt(2026, 2, 24).unwrap(),
+            ai_params: None,
+        }
+    }
+}
+
 pub struct CliMapper;
 
 impl CliMapper {
-    pub fn map_add_command(
-        title: Option<String>,
-        date: Option<String>,
-        start: Option<String>,
-        end: Option<String>,
-        calendar: String,
-        repeat: Option<String>,
-        every: Option<u32>,
-        on: Option<String>,
-        until: Option<String>,
-        count: Option<u32>,
-        recur: Option<Vec<String>>,
-        reminder: Option<Vec<String>>,
-        reminders: Option<String>,
-        location: Option<String>,
-        today: NaiveDate,
-        ai_params: Option<AiEventParameters>,
-    ) -> Result<NewEvent, GcalError> {
-        // title: CLI が優先、なければ AI から取得
+    pub fn map_add_command(input: AddCommandInput) -> Result<NewEvent, GcalError> {
+        let AddCommandInput {
+            title, date, start, end, calendar, location,
+            recurrence, reminder_args, today, ai_params
+        } = input;
         let effective_title = title
             .or_else(|| ai_params.as_ref().and_then(|p| p.title.clone()))
             .ok_or_else(|| {
@@ -35,11 +89,9 @@ impl CliMapper {
                 )
             })?;
 
-        // location: CLI が優先、なければ AI から取得
         let effective_location = location
             .or_else(|| ai_params.as_ref().and_then(|p| p.location.clone()));
 
-        // 時刻解決: CLI --date > CLI --start > AI の date+start を合成
         let (start_dt, end_dt) = if let Some(d) = date {
             parse_datetime_range_expr(&d, today)?
         } else {
@@ -58,8 +110,6 @@ impl CliMapper {
 
             let start_dt = parse_datetime_expr(&start_str, today)?;
 
-            // end: CLI --end > AI の end > デフォルト +1h
-            // AI の end が時刻のみ（HH:MM）の場合は開始日と合成する
             let end_str = end.or_else(|| ai_params.as_ref().and_then(|p| p.end.clone()));
             let end_dt = match end_str {
                 Some(e) => parse_end_expr(&normalize_ai_end(&e, &start_dt), start_dt, today)?,
@@ -68,29 +118,11 @@ impl CliMapper {
             (start_dt, end_dt)
         };
 
-        let recurrence_payload = parse_recurrence(
-            repeat.as_deref(),
-            every,
-            on.as_deref(),
-            until.as_deref(),
-            count,
-            recur,
-            today,
-        )?;
-        // reminders: CLI --reminder/--reminders が優先。
-        // AI を使用した場合は AI の reminder または デフォルト popup:10m を適用。
-        // AI なし・CLI reminder なし → None（カレンダーデフォルト）
-        let reminders_payload = if reminder.is_some() || reminders.is_some() {
-            parse_reminders(reminder, reminders.as_deref())?
+        let recurrence_payload = parse_recurrence_args(recurrence, today)?;
+        let reminders_payload = if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
+            parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
         } else if let Some(ref ai) = ai_params {
-            let ai_reminder_str = ai.reminder.as_deref().unwrap_or("popup:10m");
-            // AI がカンマ区切りで複数の reminder を返す場合があるため分割する
-            let ai_reminders: Vec<String> = ai_reminder_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            parse_reminders(Some(ai_reminders), None)?
+            parse_ai_reminders(ai.reminder.as_deref().unwrap_or("popup:10m"))?
         } else {
             None
         };
@@ -106,33 +138,16 @@ impl CliMapper {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn map_update_command(
-        event_id: String,
-        title: Option<String>,
-        date: Option<String>,
-        start: Option<String>,
-        end: Option<String>,
-        calendar: String,
-        clear_repeat: bool,
-        clear_reminders: bool,
-        clear_location: bool,
-        repeat: Option<String>,
-        every: Option<u32>,
-        on: Option<String>,
-        until: Option<String>,
-        count: Option<u32>,
-        recur: Option<Vec<String>>,
-        reminder: Option<Vec<String>>,
-        reminders: Option<String>,
-        location: Option<String>,
-        today: NaiveDate,
-        ai_params: Option<AiEventParameters>,
-    ) -> Result<UpdateEvent, GcalError> {
+    pub fn map_update_command(input: UpdateCommandInput) -> Result<UpdateEvent, GcalError> {
+        let UpdateCommandInput {
+            event_id, calendar, title, date, start, end,
+            clear_repeat, clear_reminders, clear_location, location,
+            recurrence, reminder_args, today, ai_params
+        } = input;
         // CLI か AI のいずれかで何か更新対象が必要
         let has_cli_update = title.is_some() || start.is_some() || date.is_some()
-            || repeat.is_some() || recur.is_some() || reminder.is_some()
-            || reminders.is_some() || location.is_some()
+            || recurrence.repeat.is_some() || recurrence.recur.is_some() || reminder_args.reminder.is_some()
+            || reminder_args.reminders.is_some() || location.is_some()
             || clear_repeat || clear_reminders || clear_location;
         if !has_cli_update && ai_params.is_none() {
             return Err(GcalError::ConfigError(
@@ -140,10 +155,8 @@ impl CliMapper {
             ));
         }
 
-        // title: CLI > AI
         let effective_title = title.or_else(|| ai_params.as_ref().and_then(|p| p.title.clone()));
 
-        // 時刻解決: CLI --date > CLI --start > AI date+start
         let (start_dt, end_dt) = if let Some(d) = date {
             let (s, e) = parse_datetime_range_expr(&d, today)?;
             (Some(s), Some(e))
@@ -161,12 +174,11 @@ impl CliMapper {
                 (Some(d), Some(t)) => {
                     let combined = format!("{d} {t}");
                     let start_dt = parse_datetime_expr(&combined, today)?;
-                    let end_str = ai.end.as_deref();
-                    let end_dt = match end_str {
-                        Some(e) => parse_end_expr(&normalize_ai_end(e, &start_dt), start_dt, today)?,
-                        None => start_dt + Duration::hours(1),
+                    let end_dt = match &ai.end {
+                        Some(e) => Some(parse_end_expr(&normalize_ai_end(e, &start_dt), start_dt, today)?),
+                        None => Some(start_dt + Duration::hours(1)),
                     };
-                    (Some(start_dt), Some(end_dt))
+                    (Some(start_dt), end_dt)
                 }
                 _ => (None, None),
             }
@@ -174,33 +186,27 @@ impl CliMapper {
             (None, None)
         };
 
-        let mut recurrence_payload = parse_recurrence(
-            repeat.as_deref(),
-            every,
-            on.as_deref(),
-            until.as_deref(),
-            count,
-            recur,
-            today,
-        )?;
-        if clear_repeat {
-            recurrence_payload = Some(vec![]);
-        }
+        let recurrence_payload = if clear_repeat {
+            Some(vec![])
+        } else {
+            parse_recurrence_args(recurrence, today)?
+        };
 
-        let mut reminders_payload = parse_reminders(
-            reminder,
-            reminders.as_deref(),
-        )?;
-        if clear_reminders {
-            reminders_payload = Some(crate::gcal_api::models::EventReminders {
+        let reminders_payload = if clear_reminders {
+            Some(crate::gcal_api::models::EventReminders {
                 use_default: false,
                 overrides: Some(vec![]),
-            });
-        }
+            })
+        } else if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
+            parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
+        } else if let Some(ref ai) = ai_params {
+            ai.reminder.as_deref().map(parse_ai_reminders).transpose()?.flatten()
+        } else {
+            None
+        };
 
-        // location: clear_location > CLI > AI
         let effective_location = if clear_location {
-            Some(String::new())
+            Some("".to_string())
         } else {
             location.or_else(|| ai_params.as_ref().and_then(|p| p.location.clone()))
         };
@@ -255,6 +261,28 @@ fn normalize_ai_end(end: &str, start: &DateTime<Local>) -> String {
     end.to_string()
 }
 
+/// RecurrenceArgs の各フィールドを parse_recurrence に委譲するヘルパー
+fn parse_recurrence_args(r: crate::cli::RecurrenceArgs, today: NaiveDate) -> Result<Option<Vec<String>>, GcalError> {
+    parse_recurrence(
+        r.repeat.as_deref(),
+        r.every,
+        r.on.as_deref(),
+        r.until.as_deref(),
+        r.count,
+        r.recur,
+        today,
+    )
+}
+
+/// AI がカンマ区切りで返す reminder 文字列を EventReminders に変換するヘルパー
+fn parse_ai_reminders(s: &str) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
+    let items: Vec<String> = s.split(',')
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    parse_reminders(Some(items), None)
+}
+
 pub fn naive_date_to_utc_start(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
     Local
         .from_local_datetime(&date.and_hms_opt(0, 0, 0).expect("0:00:00 は常に有効"))
@@ -272,37 +300,53 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::NaiveDate;
-    use crate::ai::types::AiEventParameters;
+    mod tests {
+        use super::*;
+        use chrono::NaiveDate;
+        use crate::ai::types::AiEventParameters;
 
-    fn today() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
-    }
+        fn today() -> NaiveDate {
+            NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
+        }
 
-    // --- map_add_command: リグレッションテスト ---
+        fn make_add_input() -> AddCommandInput {
+            AddCommandInput {
+                calendar: "primary".to_string(),
+                today: today(),
+                ..Default::default()
+            }
+        }
+
+        fn make_update_input() -> UpdateCommandInput {
+            UpdateCommandInput {
+                calendar: "primary".to_string(),
+                today: today(),
+                ..Default::default()
+            }
+        }
+
+        // --- map_add_command: リグレッションテスト ---
 
     #[test]
     fn test_map_add_command_all_args() {
-        let event = CliMapper::map_add_command(
-            Some("Test Event".to_string()),
-            Some("2026/05/10 10:00-11:00".to_string()),
-            None,
-            None,
-            "primary".to_string(),
-            Some("weekly".to_string()),
-            Some(2),
-            Some("mon,wed".to_string()),
-            None,
-            Some(5),
-            None,
-            Some(vec!["popup:10m".to_string()]),
-            None,
-            Some("Tokyo Tower".to_string()),
-            today(),
-            None,
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            title: Some("Test Event".to_string()),
+            date: Some("2026/05/10 10:00-11:00".to_string()),
+            location: Some("Tokyo Tower".to_string()),
+            recurrence: crate::cli::RecurrenceArgs {
+                repeat: Some("weekly".to_string()),
+                every: Some(2),
+                on: Some("mon,wed".to_string()),
+                until: None,
+                count: Some(5),
+                recur: None,
+            },
+            reminder_args: crate::cli::ReminderArgs {
+                reminder: Some(vec!["popup:10m".to_string()]),
+                reminders: None,
+            },
+            ..make_add_input()
+        }).unwrap();
 
         assert_eq!(event.summary, "Test Event");
         assert_eq!(event.calendar_id, "primary");
@@ -318,15 +362,10 @@ mod tests {
     #[test]
     fn test_map_add_no_title_no_ai_returns_error() {
         // title=None、AI なし → エラー
-        let result = CliMapper::map_add_command(
-            None,
-            Some("2026/3/20 10:00-11:00".to_string()),
-            None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            None,
-        );
+        let result = CliMapper::map_add_command(AddCommandInput {
+            date: Some("2026/3/20 10:00-11:00".to_string()),
+            ..make_add_input()
+        });
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("タイトル"), "エラーメッセージにタイトルが含まれていません: {msg}");
@@ -340,18 +379,12 @@ mod tests {
             date: Some("2026/3/20".to_string()),
             start: Some("10:00".to_string()),
             end: Some("11:00".to_string()),
-            location: None,
-            repeat_rule: None,
-            reminder: None,
-            calendar: None,
+            ..Default::default()
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.summary, "AI MTG");
     }
 
@@ -362,20 +395,13 @@ mod tests {
             title: Some("AI title".to_string()),
             date: Some("2026/3/20".to_string()),
             start: Some("10:00".to_string()),
-            end: None,
-            location: None,
-            repeat_rule: None,
-            reminder: None,
-            calendar: None,
+            ..Default::default()
         };
-        let event = CliMapper::map_add_command(
-            Some("CLI title".to_string()),
-            None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            title: Some("CLI title".to_string()),
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.summary, "CLI title");
     }
 
@@ -394,13 +420,10 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:00");
         assert_eq!(event.end.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:30");
     }
@@ -418,13 +441,10 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.start.format("%H:%M").to_string(), "14:00");
         assert_eq!(event.end.format("%H:%M").to_string(), "15:00");
     }
@@ -442,16 +462,11 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None,
-            None,
-            Some("2026/3/20 14:00".to_string()), // CLI --start が優先
-            None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            start: Some("2026/3/20 14:00".to_string()),
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 14:00");
     }
 
@@ -468,13 +483,10 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let result = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        );
+        let result = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        });
         assert!(result.is_err());
     }
 
@@ -493,14 +505,10 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None,
-            None, // CLI location なし
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.location.as_deref(), Some("会議室A"));
     }
 
@@ -517,14 +525,11 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None,
-            "primary".to_string(),
-            None, None, None, None, None, None, None, None,
-            Some("CLI 場所".to_string()), // CLI が優先
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            location: Some("CLI 場所".to_string()),
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         assert_eq!(event.location.as_deref(), Some("CLI 場所"));
     }
 
@@ -561,13 +566,13 @@ mod tests {
 
     #[test]
     fn test_map_update_command_clear_flags() {
-        let event = CliMapper::map_update_command(
-            "event_123".to_string(),
-            None, None, None, None, "primary".to_string(),
-            true, true, true, None, None, None, None, None, None, None, None, None,
-            today(),
-            None,
-        ).unwrap();
+        let event = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "event_123".to_string(),
+            clear_repeat: true,
+            clear_reminders: true,
+            clear_location: true,
+            ..make_update_input()
+        }).unwrap();
 
         assert_eq!(event.event_id, "event_123");
         assert_eq!(event.title, None);
@@ -587,13 +592,11 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_update_command(
-            "evt_1".to_string(),
-            None, None, None, None, "primary".to_string(),
-            false, false, false, None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "evt_1".to_string(),
+            ai_params: Some(ai),
+            ..make_update_input()
+        }).unwrap();
         assert_eq!(event.title.as_deref(), Some("AI更新タイトル"));
     }
 
@@ -606,14 +609,12 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_update_command(
-            "evt_1".to_string(),
-            Some("CLI title".to_string()),
-            None, None, None, "primary".to_string(),
-            false, false, false, None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "evt_1".to_string(),
+            title: Some("CLI title".to_string()),
+            ai_params: Some(ai),
+            ..make_update_input()
+        }).unwrap();
         assert_eq!(event.title.as_deref(), Some("CLI title"));
     }
 
@@ -630,13 +631,11 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_update_command(
-            "evt_1".to_string(),
-            None, None, None, None, "primary".to_string(),
-            false, false, false, None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "evt_1".to_string(),
+            ai_params: Some(ai),
+            ..make_update_input()
+        }).unwrap();
         let start = event.start.unwrap();
         let end = event.end.unwrap();
         assert_eq!(start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:00");
@@ -654,13 +653,11 @@ mod tests {
             reminder: None,
             calendar: None,
         };
-        let event = CliMapper::map_update_command(
-            "evt_1".to_string(),
-            None, None, None, None, "primary".to_string(),
-            false, false, false, None, None, None, None, None, None, None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "evt_1".to_string(),
+            ai_params: Some(ai),
+            ..make_update_input()
+        }).unwrap();
         assert_eq!(event.location.as_deref(), Some("AI会議室"));
     }
 
@@ -679,13 +676,10 @@ mod tests {
             reminder: Some("popup:10m".to_string()),
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None, "primary".to_string(),
-            None, None, None, None, None, None,
-            None, None, None, // reminder, reminders, location
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         let rem = event.reminders.unwrap();
         assert!(!rem.use_default);
         let overrides = rem.overrides.unwrap();
@@ -706,13 +700,10 @@ mod tests {
             reminder: None, // AI が通知を抽出しなかった
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None, "primary".to_string(),
-            None, None, None, None, None, None,
-            None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         let rem = event.reminders.unwrap();
         assert!(!rem.use_default);
         let overrides = rem.overrides.unwrap();
@@ -733,14 +724,14 @@ mod tests {
             reminder: Some("email:1h".to_string()),
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None, "primary".to_string(),
-            None, None, None, None, None, None,
-            Some(vec!["popup:30m".to_string()]), // CLI --reminder
-            None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            reminder_args: crate::cli::ReminderArgs {
+                reminder: Some(vec!["popup:30m".to_string()]),
+                reminders: None,
+            },
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         let overrides = event.reminders.unwrap().overrides.unwrap();
         assert_eq!(overrides[0].method, "popup");
         assert_eq!(overrides[0].minutes, 30);
@@ -749,15 +740,11 @@ mod tests {
     #[test]
     fn test_map_add_no_ai_no_reminder_is_none() {
         // AI なし・CLI reminder なし → None（カレンダーデフォルト）
-        let event = CliMapper::map_add_command(
-            Some("MTG".to_string()),
-            Some("2026/3/20 10:00-11:00".to_string()),
-            None, None, "primary".to_string(),
-            None, None, None, None, None, None,
-            None, None, None,
-            today(),
-            None,
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            title: Some("MTG".to_string()),
+            date: Some("2026/3/20 10:00-11:00".to_string()),
+            ..make_add_input()
+        }).unwrap();
         assert!(event.reminders.is_none());
     }
 
@@ -774,13 +761,10 @@ mod tests {
             reminder: Some("popup:15m, popup:120m".to_string()),
             calendar: None,
         };
-        let event = CliMapper::map_add_command(
-            None, None, None, None, "primary".to_string(),
-            None, None, None, None, None, None,
-            None, None, None,
-            today(),
-            Some(ai),
-        ).unwrap();
+        let event = CliMapper::map_add_command(AddCommandInput {
+            ai_params: Some(ai),
+            ..make_add_input()
+        }).unwrap();
         let overrides = event.reminders.unwrap().overrides.unwrap();
         assert_eq!(overrides.len(), 2);
         assert_eq!(overrides[0].method, "popup");
@@ -792,13 +776,10 @@ mod tests {
     #[test]
     fn test_map_update_no_fields_no_ai_returns_error() {
         // 何も指定しない → エラー
-        let result = CliMapper::map_update_command(
-            "evt_1".to_string(),
-            None, None, None, None, "primary".to_string(),
-            false, false, false, None, None, None, None, None, None, None, None, None,
-            today(),
-            None,
-        );
+        let result = CliMapper::map_update_command(UpdateCommandInput {
+            event_id: "evt_1".to_string(),
+            ..make_update_input()
+        });
         assert!(result.is_err());
     }
 

@@ -21,14 +21,6 @@ pub struct Config {
     pub calendars: HashMap<String, String>,
 }
 
-impl Config {
-    /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
-    /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
-    pub fn resolve_calendar_id(&self, input: &str) -> String {
-        self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Credentials {
     pub client_id: String,
@@ -52,27 +44,31 @@ pub struct AiConfig {
     pub enabled: bool,
 }
 
-fn default_ai_base_url() -> String {
-    "http://localhost:11434".to_string()
-}
-fn default_ai_model() -> String {
-    "gemma3:4b".to_string()
-}
-fn default_ai_enabled() -> bool {
-    true
-}
+pub const DEFAULT_AI_BASE_URL: &str = "http://localhost:11434";
+pub const DEFAULT_AI_MODEL: &str = "gemma3:4b";
+const DEFAULT_AI_ENABLED: bool = true;
+
+fn default_ai_base_url() -> String { DEFAULT_AI_BASE_URL.to_string() }
+fn default_ai_model() -> String { DEFAULT_AI_MODEL.to_string() }
+fn default_ai_enabled() -> bool { DEFAULT_AI_ENABLED }
 
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            base_url: default_ai_base_url(),
-            model: default_ai_model(),
-            enabled: default_ai_enabled(),
+            base_url: DEFAULT_AI_BASE_URL.to_string(),
+            model: DEFAULT_AI_MODEL.to_string(),
+            enabled: DEFAULT_AI_ENABLED,
         }
     }
 }
 
 impl Config {
+    /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
+    /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
+    pub fn resolve_calendar_id(&self, input: &str) -> String {
+        self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
+    }
+
     /// デフォルトの設定ファイルパスを返す（~/.config/gcal/config.toml）
     pub fn default_path() -> Result<PathBuf, GcalError> {
         let dir = dirs::config_dir()
