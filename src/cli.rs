@@ -46,19 +46,24 @@ pub enum Commands {
         #[arg(long, conflicts_with_all = ["date", "days"])]
         to: Option<String>,
     },
-    /// 既存の予定を更新（--title / --start / --end のうち少なくとも1つ必須）
+    /// 既存の予定を更新（--title / --start・--end / --date のうち少なくとも1つ必須）
     Update {
         /// イベント ID
         event_id: String,
         /// 新しいタイトル
         #[arg(long)]
         title: Option<String>,
-        /// 新しい開始日時（--end と同時指定必須）
-        #[arg(long, requires = "end")]
+        /// 新しい開始日時（--end と同時指定必須、--date と排他）
+        #[arg(long, requires = "end", conflicts_with = "date")]
         start: Option<String>,
-        /// 新しい終了日時（--start と同時指定必須）
-        #[arg(long, requires = "start")]
+        /// 新しい終了日時（--start と同時指定必須、--date と排他）
+        /// 相対指定可: "+1h", "+30m", "+1h30m"
+        #[arg(long, requires = "start", conflicts_with = "date")]
         end: Option<String>,
+        /// 開始〜終了を一括指定（--start / --end と排他）
+        /// 例: "今日 12:00", "今日 12:00-13:00", "今日 12:00+1h"
+        #[arg(long, conflicts_with_all = ["start", "end"])]
+        date: Option<String>,
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
@@ -78,11 +83,15 @@ pub enum Commands {
     Add {
         /// 予定名
         title: String,
-        /// 開始日時（例: "今日 14:00", "3/19 10:00"）
-        #[arg(long)]
-        start: String,
-        /// 終了日時（省略時: 開始 +1時間）
-        #[arg(long)]
+        /// 開始〜終了を一括指定（--start / --end と排他）
+        /// 例: "今日 12:00", "今日 12:00-13:00", "今日 12:00+1h"
+        #[arg(long, conflicts_with_all = ["start", "end"])]
+        date: Option<String>,
+        /// 開始日時（--date と排他、例: "今日 14:00", "3/19 10:00"）
+        #[arg(long, conflicts_with = "date")]
+        start: Option<String>,
+        /// 終了日時（省略時: 開始 +1時間、相対指定可: "+1h", "+30m"、--date と排他）
+        #[arg(long, conflicts_with = "date")]
         end: Option<String>,
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]

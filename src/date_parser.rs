@@ -292,6 +292,149 @@ pub fn parse_datetime_expr(input: &str, today: NaiveDate) -> Result<DateTime<Loc
 }
 
 // ============================================================
+// 相対時間・終了時刻・日時範囲 パース
+// ============================================================
+
+/// "+1h", "+30m", "+1h30m", "+90m" などの相対時間を Duration に変換する
+///
+/// `+` プレフィックスが必須。なければエラー。
+pub fn parse_duration_str(s: &str) -> Result<Duration, GcalError> {
+    let rest = s.strip_prefix('+').ok_or_else(|| {
+        GcalError::ConfigError(format!(
+            "相対時間には '+' が必要です: '{s}'\n例: \"+1h\", \"+30m\", \"+1h30m\""
+        ))
+    })?;
+    if rest.is_empty() {
+        return Err(GcalError::ConfigError(format!("相対時間の値がありません: '{s}'")));
+    }
+
+    let mut hours: i64 = 0;
+    let mut minutes: i64 = 0;
+    let mut remaining = rest;
+
+    if let Some(h_pos) = remaining.find('h') {
+        let h_str = &remaining[..h_pos];
+        hours = h_str.parse::<i64>().map_err(|_| {
+            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
+        })?;
+        remaining = &remaining[h_pos + 1..];
+    }
+
+    if !remaining.is_empty() {
+        let m_str = remaining.strip_suffix('m').ok_or_else(|| {
+            GcalError::ConfigError(format!(
+                "相対時間の形式が不正です: '{s}'\n例: \"+1h\", \"+30m\", \"+1h30m\""
+            ))
+        })?;
+        minutes = m_str.parse::<i64>().map_err(|_| {
+            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
+        })?;
+    }
+
+    Ok(Duration::hours(hours) + Duration::minutes(minutes))
+}
+
+/// 終了日時を解析する
+///
+/// - `+` で始まる場合: `parse_duration_str` で解析し `start + duration` を返す
+/// - それ以外: `parse_datetime_expr` に委譲
+pub fn parse_end_expr(
+    input: &str,
+    start: DateTime<Local>,
+    today: NaiveDate,
+) -> Result<DateTime<Local>, GcalError> {
+    if input.starts_with('+') {
+        let dur = parse_duration_str(input)?;
+        Ok(start + dur)
+    } else {
+        parse_datetime_expr(input, today)
+    }
+}
+
+/// 内部ヘルパー: "HH:MM[-HH:MM]" または "H:MM[+duration]" を (time_str, end_spec) に分割
+///
+/// コロン位置 + 3 が時刻文字列の終端 (コロン + 2桁の分まで)
+fn split_time_and_end_spec(s: &str) -> Option<(&str, Option<&str>)> {
+    let colon_pos = s.find(':')?;
+    let end_of_time = colon_pos + 3;
+    if end_of_time > s.len() {
+        return None;
+    }
+    let time_str = &s[..end_of_time];
+    let rest = &s[end_of_time..];
+    if rest.is_empty() {
+        return Some((time_str, None));
+    }
+    if rest.starts_with('-') || rest.starts_with('+') {
+        return Some((time_str, Some(rest)));
+    }
+    None
+}
+
+/// "今日 12:00-13:00" や "明日 10:00+1h" など、日時範囲を1フラグで指定する形式を解析する
+///
+/// 対応形式:
+/// - `"今日 12:00"` → 開始 12:00、終了 13:00 (デフォルト +1h)
+/// - `"今日 12:00-13:30"` → 開始 12:00、終了 13:30
+/// - `"今日 12:00+1h"` → 開始 12:00、終了 13:00
+/// - `"明日 10:00+30m"` → 開始 10:00、終了 10:30
+pub fn parse_datetime_range_expr(
+    input: &str,
+    today: NaiveDate,
+) -> Result<(DateTime<Local>, DateTime<Local>), GcalError> {
+    let s = input.trim();
+    let (date_part, time_spec) = s.rsplit_once(' ').ok_or_else(|| {
+        GcalError::ConfigError(format!(
+            "日時範囲の形式が不正です: '{input}'\n\
+             例: \"今日 12:00\", \"今日 12:00-13:00\", \"今日 12:00+1h\""
+        ))
+    })?;
+
+    let (time_str, end_spec) = split_time_and_end_spec(time_spec).ok_or_else(|| {
+        GcalError::ConfigError(format!(
+            "時刻の形式が不正です: '{time_spec}'\n例: \"12:00\", \"12:00-13:00\", \"12:00+1h\""
+        ))
+    })?;
+
+    let time = NaiveTime::parse_from_str(time_str, "%H:%M").map_err(|_| {
+        GcalError::ConfigError(format!(
+            "時刻の形式が不正です: '{time_str}'\n例: \"14:00\", \"9:30\""
+        ))
+    })?;
+
+    let date = parse_date_expr(date_part, today)?.from;
+    let start_dt = Local
+        .from_local_datetime(&date.and_time(time))
+        .single()
+        .ok_or_else(|| {
+            GcalError::ConfigError(format!("ローカル時刻の変換に失敗しました: '{input}'"))
+        })?;
+
+    let end_dt = match end_spec {
+        None => start_dt + Duration::hours(1),
+        Some(spec) if spec.starts_with('+') => {
+            let dur = parse_duration_str(spec)?;
+            start_dt + dur
+        }
+        Some(spec) => {
+            // starts_with('-') が保証される
+            let end_time_str = &spec[1..];
+            let end_time = NaiveTime::parse_from_str(end_time_str, "%H:%M").map_err(|_| {
+                GcalError::ConfigError(format!("終了時刻の形式が不正です: '{end_time_str}'"))
+            })?;
+            Local
+                .from_local_datetime(&date.and_time(end_time))
+                .single()
+                .ok_or_else(|| {
+                    GcalError::ConfigError("ローカル時刻の変換に失敗しました".to_string())
+                })?
+        }
+    };
+
+    Ok((start_dt, end_dt))
+}
+
+// ============================================================
 // テスト
 // ============================================================
 
@@ -608,5 +751,117 @@ mod tests {
         // 不正な日付 → エラー
         let result = parse_datetime_expr("来年 10:00", today());
         assert!(result.is_err());
+    }
+
+    // --- parse_duration_str のテスト ---
+
+    #[test]
+    fn test_duration_1h() {
+        assert_eq!(parse_duration_str("+1h").unwrap(), Duration::hours(1));
+    }
+
+    #[test]
+    fn test_duration_30m() {
+        assert_eq!(parse_duration_str("+30m").unwrap(), Duration::minutes(30));
+    }
+
+    #[test]
+    fn test_duration_1h30m() {
+        assert_eq!(
+            parse_duration_str("+1h30m").unwrap(),
+            Duration::hours(1) + Duration::minutes(30)
+        );
+    }
+
+    #[test]
+    fn test_duration_90m() {
+        assert_eq!(parse_duration_str("+90m").unwrap(), Duration::minutes(90));
+    }
+
+    #[test]
+    fn test_duration_no_plus_returns_error() {
+        assert!(parse_duration_str("1h").is_err());
+    }
+
+    #[test]
+    fn test_duration_invalid_returns_error() {
+        assert!(parse_duration_str("+abc").is_err());
+    }
+
+    // --- parse_end_expr のテスト ---
+
+    fn local_dt(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Local> {
+        Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(h, min, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_end_expr_relative_1h() {
+        let start = local_dt(2026, 2, 24, 13, 0);
+        let end = parse_end_expr("+1h", start, today()).unwrap();
+        assert_eq!(end, local_dt(2026, 2, 24, 14, 0));
+    }
+
+    #[test]
+    fn test_end_expr_relative_30m() {
+        let start = local_dt(2026, 2, 24, 13, 0);
+        let end = parse_end_expr("+30m", start, today()).unwrap();
+        assert_eq!(end, local_dt(2026, 2, 24, 13, 30));
+    }
+
+    #[test]
+    fn test_end_expr_absolute() {
+        let start = local_dt(2026, 2, 24, 13, 0);
+        let end = parse_end_expr("明日 15:00", start, today()).unwrap();
+        assert_eq!(end, local_dt(2026, 2, 25, 15, 0));
+    }
+
+    // --- parse_datetime_range_expr のテスト ---
+
+    #[test]
+    fn test_range_default_1h() {
+        let (s, e) = parse_datetime_range_expr("今日 12:00", today()).unwrap();
+        assert_eq!(s, local_dt(2026, 2, 24, 12, 0));
+        assert_eq!(e, local_dt(2026, 2, 24, 13, 0));
+    }
+
+    #[test]
+    fn test_range_absolute_end() {
+        let (s, e) = parse_datetime_range_expr("今日 12:00-13:30", today()).unwrap();
+        assert_eq!(s, local_dt(2026, 2, 24, 12, 0));
+        assert_eq!(e, local_dt(2026, 2, 24, 13, 30));
+    }
+
+    #[test]
+    fn test_range_relative_end_1h() {
+        let (s, e) = parse_datetime_range_expr("今日 12:00+1h", today()).unwrap();
+        assert_eq!(s, local_dt(2026, 2, 24, 12, 0));
+        assert_eq!(e, local_dt(2026, 2, 24, 13, 0));
+    }
+
+    #[test]
+    fn test_range_relative_end_30m() {
+        let (s, e) = parse_datetime_range_expr("明日 10:00+30m", today()).unwrap();
+        assert_eq!(s, local_dt(2026, 2, 25, 10, 0));
+        assert_eq!(e, local_dt(2026, 2, 25, 10, 30));
+    }
+
+    #[test]
+    fn test_range_relative_end_1h30m() {
+        let (s, e) = parse_datetime_range_expr("3/20 14:00+1h30m", today()).unwrap();
+        assert_eq!(s, local_dt(2026, 3, 20, 14, 0));
+        assert_eq!(e, local_dt(2026, 3, 20, 15, 30));
+    }
+
+    #[test]
+    fn test_range_no_space_returns_error() {
+        assert!(parse_datetime_range_expr("9:30", today()).is_err());
     }
 }

@@ -7,7 +7,7 @@ use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::config::{Config, FileTokenStore};
-use gcal::date_parser::{parse_datetime_expr, resolve_event_range};
+use gcal::date_parser::{parse_datetime_expr, parse_datetime_range_expr, parse_end_expr, resolve_event_range};
 use gcal::domain::{NewEvent, UpdateEvent};
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
@@ -47,12 +47,22 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Add { title, start, end, calendar } => {
+        Commands::Add { title, date, start, end, calendar } => {
             let today = Local::now().date_naive();
-            let start_dt = parse_datetime_expr(&start, today)?;
-            let end_dt = match end {
-                Some(e) => parse_datetime_expr(&e, today)?,
-                None => start_dt + Duration::hours(1),
+            let (start_dt, end_dt) = if let Some(d) = date {
+                parse_datetime_range_expr(&d, today)?
+            } else {
+                let s = start.ok_or_else(|| {
+                    GcalError::ConfigError(
+                        "--date か --start のいずれかを指定してください".to_string(),
+                    )
+                })?;
+                let start_dt = parse_datetime_expr(&s, today)?;
+                let end_dt = match end {
+                    Some(e) => parse_end_expr(&e, start_dt, today)?,
+                    None => start_dt + Duration::hours(1),
+                };
+                (start_dt, end_dt)
             };
             let event = NewEvent {
                 summary: title,
@@ -65,19 +75,26 @@ async fn run() -> Result<(), GcalError> {
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, start, end, calendar } => {
-            // --title も --start/--end も指定されていない場合はエラー
-            if title.is_none() && start.is_none() {
+        Commands::Update { event_id, title, date, start, end, calendar } => {
+            // --title / --start・--end / --date のいずれも指定されていない場合はエラー
+            if title.is_none() && start.is_none() && date.is_none() {
                 return Err(GcalError::ConfigError(
-                    "--title / --start・--end のいずれかを指定してください".to_string(),
+                    "--title / --start・--end / --date のいずれかを指定してください".to_string(),
                 ));
             }
             let today = Local::now().date_naive();
-            let (start_dt, end_dt) = match (start, end) {
-                (Some(s), Some(e)) => {
-                    (Some(parse_datetime_expr(&s, today)?), Some(parse_datetime_expr(&e, today)?))
+            let (start_dt, end_dt) = if let Some(d) = date {
+                let (s, e) = parse_datetime_range_expr(&d, today)?;
+                (Some(s), Some(e))
+            } else {
+                match (start, end) {
+                    (Some(s), Some(e)) => {
+                        let start_dt = parse_datetime_expr(&s, today)?;
+                        let end_dt = parse_end_expr(&e, start_dt, today)?;
+                        (Some(start_dt), Some(end_dt))
+                    }
+                    _ => (None, None),
                 }
-                _ => (None, None),
             };
             let event = UpdateEvent {
                 event_id,
