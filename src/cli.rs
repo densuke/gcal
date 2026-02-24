@@ -27,6 +27,10 @@ pub enum Commands {
         #[arg(long, conflicts_with_all = ["date", "from", "to"])]
         days: Option<u64>,
 
+        /// イベント ID を表示する
+        #[arg(long)]
+        ids: bool,
+
         /// 日付・期間を自然言語で指定（--days / --from / --to と同時指定不可）
         /// 例: 今日, 明日, 来週, 今月, 3/19, 3月19日, 3日後
         #[arg(long, conflicts_with_all = ["days", "from", "to"])]
@@ -41,6 +45,34 @@ pub enum Commands {
         /// 例: 3/25, 来週, 今月末
         #[arg(long, conflicts_with_all = ["date", "days"])]
         to: Option<String>,
+    },
+    /// 既存の予定を更新（--title / --start / --end のうち少なくとも1つ必須）
+    Update {
+        /// イベント ID
+        event_id: String,
+        /// 新しいタイトル
+        #[arg(long)]
+        title: Option<String>,
+        /// 新しい開始日時（--end と同時指定必須）
+        #[arg(long, requires = "end")]
+        start: Option<String>,
+        /// 新しい終了日時（--start と同時指定必須）
+        #[arg(long, requires = "start")]
+        end: Option<String>,
+        /// カレンダーID（デフォルト: primary）
+        #[arg(long, default_value = "primary")]
+        calendar: String,
+    },
+    /// 既存の予定を削除
+    Delete {
+        /// イベント ID
+        event_id: String,
+        /// 確認をスキップして削除
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// カレンダーID（デフォルト: primary）
+        #[arg(long, default_value = "primary")]
+        calendar: String,
     },
     /// Google Calendar に予定を登録
     Add {

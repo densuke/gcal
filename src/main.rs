@@ -8,7 +8,7 @@ use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::config::{Config, FileTokenStore};
 use gcal::date_parser::{parse_datetime_expr, resolve_event_range};
-use gcal::domain::NewEvent;
+use gcal::domain::{NewEvent, UpdateEvent};
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -65,7 +65,49 @@ async fn run() -> Result<(), GcalError> {
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Events { calendar, days, date, from, to } => {
+        Commands::Update { event_id, title, start, end, calendar } => {
+            // --title も --start/--end も指定されていない場合はエラー
+            if title.is_none() && start.is_none() {
+                return Err(GcalError::ConfigError(
+                    "--title / --start・--end のいずれかを指定してください".to_string(),
+                ));
+            }
+            let today = Local::now().date_naive();
+            let (start_dt, end_dt) = match (start, end) {
+                (Some(s), Some(e)) => {
+                    (Some(parse_datetime_expr(&s, today)?), Some(parse_datetime_expr(&e, today)?))
+                }
+                _ => (None, None),
+            };
+            let event = UpdateEvent {
+                event_id,
+                calendar_id: calendar,
+                title,
+                start: start_dt,
+                end: end_dt,
+            };
+            let app = build_app(&config_path)?;
+            let mut out = std::io::stdout();
+            app.handle_update_event(event, &mut out).await?;
+        }
+
+        Commands::Delete { event_id, force, calendar } => {
+            if !force {
+                let answer = prompt(&format!(
+                    "イベント (ID: {}) を削除しますか? [y/N]: ",
+                    event_id
+                ))?;
+                if answer.to_lowercase() != "y" {
+                    println!("キャンセルしました");
+                    return Ok(());
+                }
+            }
+            let app = build_app(&config_path)?;
+            let mut out = std::io::stdout();
+            app.handle_delete_event(&calendar, &event_id, &mut out).await?;
+        }
+
+        Commands::Events { calendar, days, date, from, to, ids } => {
             let today = Local::now().date_naive();
             let range = resolve_event_range(
                 date.as_deref(),
@@ -80,7 +122,7 @@ async fn run() -> Result<(), GcalError> {
 
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_events(&calendar, time_min, time_max, &mut out).await?;
+            app.handle_events(&calendar, time_min, time_max, ids, &mut out).await?;
         }
     }
 

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use crate::domain::{CalendarSummary, EventQuery, EventSummary, NewEvent, OAuthCallback, StoredTokens};
+use crate::domain::{CalendarSummary, EventQuery, EventSummary, NewEvent, OAuthCallback, StoredTokens, UpdateEvent};
 use crate::error::GcalError;
 
 /// 現在時刻を提供するトレイト（テスト時に固定時刻を注入するため）
@@ -43,6 +43,10 @@ pub trait CalendarClient: Send + Sync {
     async fn list_events(&self, query: EventQuery) -> Result<Vec<EventSummary>, GcalError>;
     /// イベントを作成し、作成されたイベントの ID を返す
     async fn create_event(&self, event: NewEvent) -> Result<String, GcalError>;
+    /// イベントを部分更新する（PATCH）
+    async fn update_event(&self, event: UpdateEvent) -> Result<(), GcalError>;
+    /// イベントを削除する
+    async fn delete_event(&self, calendar_id: &str, event_id: &str) -> Result<(), GcalError>;
 }
 
 // --- 本番用具体実装 ---

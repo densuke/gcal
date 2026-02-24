@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use iana_time_zone;
 
-use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent};
+use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent};
 use crate::error::GcalError;
-use crate::gcal_api::models::{CalendarListResponse, CreateEventRequest, CreateEventResponse, EventListResponse, EventTimeSpec};
+use crate::gcal_api::models::{CalendarListResponse, CreateEventRequest, CreateEventResponse, EventListResponse, EventTimeSpec, PatchEventRequest};
 use crate::ports::{CalendarClient, TokenProvider};
 
 const DEFAULT_BASE_URL: &str = "https://www.googleapis.com/calendar/v3";
@@ -158,6 +158,63 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
 
         let body: CreateEventResponse = resp.json().await?;
         Ok(body.id)
+    }
+
+    async fn update_event(&self, event: UpdateEvent) -> Result<(), GcalError> {
+        let token = self.token_provider.access_token().await?;
+        let url = format!(
+            "{}/calendars/{}/events/{}",
+            self.base_url, event.calendar_id, event.event_id
+        );
+
+        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+        let req = PatchEventRequest {
+            summary: event.title,
+            start: event.start.map(|dt| EventTimeSpec {
+                date_time: dt.to_rfc3339(),
+                time_zone: tz.clone(),
+            }),
+            end: event.end.map(|dt| EventTimeSpec {
+                date_time: dt.to_rfc3339(),
+                time_zone: tz,
+            }),
+        };
+
+        let resp = self
+            .http
+            .patch(&url)
+            .bearer_auth(&token)
+            .json(&req)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let message = resp.text().await.unwrap_or_default();
+            return Err(GcalError::ApiError { status, message });
+        }
+
+        Ok(())
+    }
+
+    async fn delete_event(&self, calendar_id: &str, event_id: &str) -> Result<(), GcalError> {
+        let token = self.token_provider.access_token().await?;
+        let url = format!("{}/calendars/{}/events/{}", self.base_url, calendar_id, event_id);
+
+        let resp = self
+            .http
+            .delete(&url)
+            .bearer_auth(&token)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let message = resp.text().await.unwrap_or_default();
+            return Err(GcalError::ApiError { status, message });
+        }
+
+        Ok(())
     }
 }
 
@@ -445,5 +502,117 @@ mod tests {
         };
         let result = client.create_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 400, .. })));
+    }
+
+    // --- update_event のテスト ---
+
+    #[tokio::test]
+    async fn test_update_event_title_only() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/calendars/primary/events/event-id-123"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "event-id-123",
+                "summary": "新しいタイトル"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let event = UpdateEvent {
+            event_id: "event-id-123".to_string(),
+            calendar_id: "primary".to_string(),
+            title: Some("新しいタイトル".to_string()),
+            start: None,
+            end: None,
+        };
+        client.update_event(event).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_update_event_start_and_end() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/calendars/primary/events/event-id-456"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "event-id-456"
+            })))
+            .mount(&server)
+            .await;
+
+        use chrono::{Local, TimeZone as _};
+        let start = Local.with_ymd_and_hms(2026, 3, 20, 10, 0, 0).unwrap();
+        let end = Local.with_ymd_and_hms(2026, 3, 20, 11, 0, 0).unwrap();
+
+        let client = make_client(&server.uri());
+        let event = UpdateEvent {
+            event_id: "event-id-456".to_string(),
+            calendar_id: "primary".to_string(),
+            title: None,
+            start: Some(start),
+            end: Some(end),
+        };
+        client.update_event(event).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_update_event_api_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/calendars/primary/events/no-such-event"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "message": "Not Found" }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let event = UpdateEvent {
+            event_id: "no-such-event".to_string(),
+            calendar_id: "primary".to_string(),
+            title: Some("test".to_string()),
+            start: None,
+            end: None,
+        };
+        let result = client.update_event(event).await;
+        assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));
+    }
+
+    // --- delete_event のテスト ---
+
+    #[tokio::test]
+    async fn test_delete_event_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/calendars/primary/events/event-del-123"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        client.delete_event("primary", "event-del-123").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_delete_event_api_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/calendars/primary/events/no-such-event"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "message": "Not Found" }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let result = client.delete_event("primary", "no-such-event").await;
+        assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));
     }
 }

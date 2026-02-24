@@ -56,3 +56,14 @@ pub struct EventTimeSpec {
 pub struct CreateEventResponse {
     pub id: String,
 }
+
+/// イベント部分更新リクエスト（None フィールドは JSON に含めない）
+#[derive(Debug, Serialize)]
+pub struct PatchEventRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<EventTimeSpec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<EventTimeSpec>,
+}

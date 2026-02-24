@@ -24,7 +24,9 @@ pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> 
 }
 
 /// イベント一覧を日付ごとにグループ化して書き出す
-pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary]) -> Result<(), GcalError> {
+///
+/// `show_ids` が true のとき、各行の末尾にイベント ID を表示する
+pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bool) -> Result<(), GcalError> {
     if events.is_empty() {
         writeln!(out, "イベントが見つかりません")?;
         return Ok(());
@@ -49,7 +51,11 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary]) -> Result<()
             current_date = Some(date);
         }
 
-        writeln!(out, "  {:5}  {}", time_str, event.summary)?;
+        if show_ids {
+            writeln!(out, "  {:5}  {:<40}  [{}]", time_str, event.summary, event.id)?;
+        } else {
+            writeln!(out, "  {:5}  {}", time_str, event.summary)?;
+        }
     }
 
     Ok(())
@@ -144,7 +150,7 @@ mod tests {
     #[test]
     fn test_write_events_empty() {
         let mut out = Vec::new();
-        write_events(&mut out, &[]).unwrap();
+        write_events(&mut out, &[], false).unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("イベントが見つかりません"));
     }
@@ -154,7 +160,7 @@ mod tests {
         // UTC 01:00 = JST 10:00（テスト環境がUTCと仮定しない。内容の存在だけ確認）
         let events = vec![make_event_dt("1", "定例ミーティング", 2026, 2, 24, 1, 0)];
         let mut out = Vec::new();
-        write_events(&mut out, &events).unwrap();
+        write_events(&mut out, &events, false).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("定例ミーティング"));
@@ -169,7 +175,7 @@ mod tests {
             make_event_dt("3", "翌日MTG", 2026, 2, 25, 1, 0),
         ];
         let mut out = Vec::new();
-        write_events(&mut out, &events).unwrap();
+        write_events(&mut out, &events, false).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         // 2月24日の見出しは1回だけ
@@ -185,11 +191,33 @@ mod tests {
     fn test_write_events_allday() {
         let events = vec![make_event_allday("1", "祝日", 2026, 2, 24)];
         let mut out = Vec::new();
-        write_events(&mut out, &events).unwrap();
+        write_events(&mut out, &events, false).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("終日"));
         assert!(s.contains("祝日"));
+    }
+
+    #[test]
+    fn test_write_events_show_ids() {
+        let events = vec![make_event_dt("abc1def2ghi3jkl4", "定例MTG", 2026, 2, 24, 1, 0)];
+        let mut out = Vec::new();
+        write_events(&mut out, &events, true).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("定例MTG"));
+        assert!(s.contains("abc1def2ghi3jkl4"), "ID が表示されていない: {}", s);
+    }
+
+    #[test]
+    fn test_write_events_no_ids_by_default() {
+        let events = vec![make_event_dt("abc1def2ghi3jkl4", "定例MTG", 2026, 2, 24, 1, 0)];
+        let mut out = Vec::new();
+        write_events(&mut out, &events, false).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("定例MTG"));
+        assert!(!s.contains("abc1def2ghi3jkl4"), "ID が表示されてはいけない: {}", s);
     }
 
     #[test]

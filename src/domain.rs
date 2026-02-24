@@ -55,3 +55,13 @@ pub struct NewEvent {
     pub start: DateTime<Local>,
     pub end: DateTime<Local>,
 }
+
+/// 既存イベントの更新内容（None のフィールドは変更しない）
+#[derive(Debug, Clone)]
+pub struct UpdateEvent {
+    pub event_id: String,
+    pub calendar_id: String,
+    pub title: Option<String>,
+    pub start: Option<DateTime<Local>>,
+    pub end: Option<DateTime<Local>>,
+}
