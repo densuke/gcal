@@ -2,7 +2,7 @@ use std::io::Write;
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{EventQuery, NewEvent};
+use crate::domain::{EventQuery, NewEvent, UpdateEvent};
 use crate::error::GcalError;
 use crate::output::{write_calendars, write_events};
 use crate::ports::CalendarClient;
@@ -17,6 +17,28 @@ impl<CAL: CalendarClient> App<CAL> {
     pub async fn handle_calendars<W: Write>(&self, out: &mut W) -> Result<(), GcalError> {
         let calendars = self.calendar_client.list_calendars().await?;
         write_calendars(out, &calendars)?;
+        Ok(())
+    }
+
+    pub async fn handle_update_event<W: Write>(
+        &self,
+        event: UpdateEvent,
+        out: &mut W,
+    ) -> Result<(), GcalError> {
+        let event_id = event.event_id.clone();
+        self.calendar_client.update_event(event).await?;
+        writeln!(out, "更新しました (ID: {})", event_id)?;
+        Ok(())
+    }
+
+    pub async fn handle_delete_event<W: Write>(
+        &self,
+        calendar_id: &str,
+        event_id: &str,
+        out: &mut W,
+    ) -> Result<(), GcalError> {
+        self.calendar_client.delete_event(calendar_id, event_id).await?;
+        writeln!(out, "削除しました (ID: {})", event_id)?;
         Ok(())
     }
 
@@ -37,6 +59,7 @@ impl<CAL: CalendarClient> App<CAL> {
         calendar_id: &str,
         time_min: DateTime<Utc>,
         time_max: DateTime<Utc>,
+        show_ids: bool,
         out: &mut W,
     ) -> Result<(), GcalError> {
         let query = EventQuery {
@@ -45,7 +68,7 @@ impl<CAL: CalendarClient> App<CAL> {
             time_max,
         };
         let events = self.calendar_client.list_events(query).await?;
-        write_events(out, &events)?;
+        write_events(out, &events, show_ids)?;
         Ok(())
     }
 }
@@ -56,7 +79,7 @@ mod tests {
     use async_trait::async_trait;
     use chrono::{NaiveDate, TimeZone, Utc};
 
-    use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent};
+    use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent};
     use crate::error::GcalError;
     use crate::ports::CalendarClient;
     use std::sync::{Arc, Mutex};
@@ -65,6 +88,8 @@ mod tests {
         calendars: Vec<CalendarSummary>,
         events: Vec<EventSummary>,
         created_events: Arc<Mutex<Vec<NewEvent>>>,
+        updated_events: Arc<Mutex<Vec<UpdateEvent>>>,
+        deleted_ids: Arc<Mutex<Vec<String>>>,
     }
 
     impl FakeCalendarClient {
@@ -73,6 +98,8 @@ mod tests {
                 calendars,
                 events,
                 created_events: Arc::new(Mutex::new(vec![])),
+                updated_events: Arc::new(Mutex::new(vec![])),
+                deleted_ids: Arc::new(Mutex::new(vec![])),
             }
         }
     }
@@ -89,6 +116,14 @@ mod tests {
             let id = format!("fake-id-{}", event.summary);
             self.created_events.lock().unwrap().push(event);
             Ok(id)
+        }
+        async fn update_event(&self, event: UpdateEvent) -> Result<(), GcalError> {
+            self.updated_events.lock().unwrap().push(event);
+            Ok(())
+        }
+        async fn delete_event(&self, _calendar_id: &str, event_id: &str) -> Result<(), GcalError> {
+            self.deleted_ids.lock().unwrap().push(event_id.to_string());
+            Ok(())
         }
     }
 
@@ -136,7 +171,7 @@ mod tests {
         };
 
         let mut out = Vec::new();
-        app.handle_events("primary", time_min(), time_max(), &mut out).await.unwrap();
+        app.handle_events("primary", time_min(), time_max(), false, &mut out).await.unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("朝会"));
@@ -186,5 +221,52 @@ mod tests {
         let events = created.lock().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].summary, "テスト会議");
+    }
+
+    // --- handle_update_event のテスト ---
+
+    #[tokio::test]
+    async fn test_handle_update_event_prints_confirmation() {
+        let client = FakeCalendarClient::new(vec![], vec![]);
+        let updated = client.updated_events.clone();
+        let app = App { calendar_client: client };
+
+        let event = UpdateEvent {
+            event_id: "evt-abc123".to_string(),
+            calendar_id: "primary".to_string(),
+            title: Some("更新後タイトル".to_string()),
+            start: None,
+            end: None,
+        };
+
+        let mut out = Vec::new();
+        app.handle_update_event(event, &mut out).await.unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("更新しました"));
+        assert!(s.contains("evt-abc123"));
+
+        let events = updated.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].title.as_deref(), Some("更新後タイトル"));
+    }
+
+    // --- handle_delete_event のテスト ---
+
+    #[tokio::test]
+    async fn test_handle_delete_event_prints_confirmation() {
+        let client = FakeCalendarClient::new(vec![], vec![]);
+        let deleted = client.deleted_ids.clone();
+        let app = App { calendar_client: client };
+
+        let mut out = Vec::new();
+        app.handle_delete_event("primary", "evt-del-456", &mut out).await.unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("削除しました"));
+        assert!(s.contains("evt-del-456"));
+
+        let ids = deleted.lock().unwrap();
+        assert_eq!(ids.as_slice(), ["evt-del-456"]);
     }
 }
