@@ -9,4 +9,6 @@ pub struct AiEventParameters {
     pub location: Option<String>,
     #[serde(default)]
     pub repeat_rule: Option<String>, // e.g., "weekly", "monthly"
+    #[serde(default)]
+    pub reminder: Option<String>, // e.g., "popup:10m", "email:1h"
 }

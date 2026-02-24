@@ -4,6 +4,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
 
 use crate::domain::{CalendarSummary, EventStart, EventSummary, NewEvent, UpdateEvent};
 use crate::error::GcalError;
+use crate::gcal_api::models::EventReminders;
 
 /// カレンダー一覧を書き出す
 pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> Result<(), GcalError> {
@@ -72,6 +73,7 @@ pub fn write_new_event_dry_run<W: Write>(event: &NewEvent, out: &mut W) -> Resul
         None | Some([]) => writeln!(out, "  繰り返し:   (なし)")?,
         Some(rules) => writeln!(out, "  繰り返し:   {}", rules.join(", "))?,
     }
+    writeln!(out, "  通知:       {}", format_reminders(&event.reminders))?;
     writeln!(out, "  カレンダー: {}", event.calendar_id)?;
     Ok(())
 }
@@ -88,8 +90,38 @@ pub fn write_update_event_dry_run<W: Write>(event: &UpdateEvent, out: &mut W) ->
         _ => writeln!(out, "  開始/終了:  (変更なし)")?,
     }
     writeln!(out, "  場所:       {}", event.location.as_deref().unwrap_or("(変更なし)"))?;
+    let reminders_str = match &event.reminders {
+        None => "(変更なし)".to_string(),
+        Some(r) => format_reminders(&Some(r.clone())),
+    };
+    writeln!(out, "  通知:       {}", reminders_str)?;
     writeln!(out, "  カレンダー: {}", event.calendar_id)?;
     Ok(())
+}
+
+fn format_reminders(reminders: &Option<EventReminders>) -> String {
+    match reminders {
+        None => "(カレンダーデフォルト)".to_string(),
+        Some(r) if r.use_default => "(カレンダーデフォルト)".to_string(),
+        Some(r) => {
+            let overrides = r.overrides.as_deref().unwrap_or(&[]);
+            if overrides.is_empty() {
+                return "(なし)".to_string();
+            }
+            overrides
+                .iter()
+                .map(|o| {
+                    let method = match o.method.as_str() {
+                        "popup" => "アプリ通知",
+                        "email" => "メール通知",
+                        other => other,
+                    };
+                    format!("{} {}分前", method, o.minutes)
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
 }
 
 fn format_date(date: NaiveDate) -> String {
@@ -332,6 +364,111 @@ mod tests {
         write_new_event_dry_run(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("[ドライラン]"), "ヘッダーが含まれない: {s}");
+    }
+
+    // --- format_reminders のテスト ---
+
+    use crate::gcal_api::models::EventReminderOverride;
+
+    #[test]
+    fn test_format_reminders_none_shows_calendar_default() {
+        assert_eq!(format_reminders(&None), "(カレンダーデフォルト)");
+    }
+
+    #[test]
+    fn test_format_reminders_use_default_shows_calendar_default() {
+        let r = EventReminders { use_default: true, overrides: None };
+        assert_eq!(format_reminders(&Some(r)), "(カレンダーデフォルト)");
+    }
+
+    #[test]
+    fn test_format_reminders_empty_overrides_shows_nashi() {
+        let r = EventReminders { use_default: false, overrides: Some(vec![]) };
+        assert_eq!(format_reminders(&Some(r)), "(なし)");
+    }
+
+    #[test]
+    fn test_format_reminders_popup_10m() {
+        let r = EventReminders {
+            use_default: false,
+            overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 10 }]),
+        };
+        assert_eq!(format_reminders(&Some(r)), "アプリ通知 10分前");
+    }
+
+    #[test]
+    fn test_format_reminders_email_60m() {
+        let r = EventReminders {
+            use_default: false,
+            overrides: Some(vec![EventReminderOverride { method: "email".to_string(), minutes: 60 }]),
+        };
+        assert_eq!(format_reminders(&Some(r)), "メール通知 60分前");
+    }
+
+    #[test]
+    fn test_format_reminders_multiple() {
+        let r = EventReminders {
+            use_default: false,
+            overrides: Some(vec![
+                EventReminderOverride { method: "popup".to_string(), minutes: 10 },
+                EventReminderOverride { method: "email".to_string(), minutes: 60 },
+            ]),
+        };
+        let s = format_reminders(&Some(r));
+        assert!(s.contains("アプリ通知 10分前"), "{s}");
+        assert!(s.contains("メール通知 60分前"), "{s}");
+    }
+
+    // --- write_new_event_dry_run: 通知表示テスト ---
+
+    #[test]
+    fn test_dry_run_new_event_shows_reminders_none_as_calendar_default() {
+        let event = base_new_event(); // reminders = None
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("カレンダーデフォルト"), "通知なし時のプレースホルダーが含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_new_event_shows_popup_reminder() {
+        let event = NewEvent {
+            reminders: Some(EventReminders {
+                use_default: false,
+                overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 10 }]),
+            }),
+            ..base_new_event()
+        };
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("アプリ通知 10分前"), "通知内容が含まれない: {s}");
+    }
+
+    // --- write_update_event_dry_run: 通知表示テスト ---
+
+    #[test]
+    fn test_dry_run_update_event_shows_reminders() {
+        let event = UpdateEvent {
+            reminders: Some(EventReminders {
+                use_default: false,
+                overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 30 }]),
+            }),
+            ..base_update_event()
+        };
+        let mut buf = Vec::new();
+        write_update_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("アプリ通知 30分前"), "通知内容が含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_update_event_shows_reminders_unchanged_when_none() {
+        let event = base_update_event(); // reminders = None
+        let mut buf = Vec::new();
+        write_update_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("変更なし"), "通知変更なしが含まれない: {s}");
     }
 
     // --- write_update_event_dry_run のテスト ---

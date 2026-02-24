@@ -76,10 +76,17 @@ impl CliMapper {
             count,
             recur,
         )?;
-        let reminders_payload = parse_reminders(
-            reminder,
-            reminders.as_deref(),
-        )?;
+        // reminders: CLI --reminder/--reminders が優先。
+        // AI を使用した場合は AI の reminder または デフォルト popup:10m を適用。
+        // AI なし・CLI reminder なし → None（カレンダーデフォルト）
+        let reminders_payload = if reminder.is_some() || reminders.is_some() {
+            parse_reminders(reminder, reminders.as_deref())?
+        } else if let Some(ref ai) = ai_params {
+            let ai_reminder_str = ai.reminder.as_deref().unwrap_or("popup:10m");
+            parse_reminders(Some(vec![ai_reminder_str.to_string()]), None)?
+        } else {
+            None
+        };
 
         Ok(NewEvent {
             summary: effective_title,
@@ -327,6 +334,7 @@ mod tests {
             end: Some("11:00".to_string()),
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -348,6 +356,7 @@ mod tests {
             end: None,
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             Some("CLI title".to_string()),
@@ -372,6 +381,7 @@ mod tests {
             end: Some("9:30".to_string()),
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -394,6 +404,7 @@ mod tests {
             end: None,
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -416,6 +427,7 @@ mod tests {
             end: None,
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None,
@@ -440,6 +452,7 @@ mod tests {
             end: None,
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let result = CliMapper::map_add_command(
             None, None, None, None,
@@ -463,6 +476,7 @@ mod tests {
             end: None,
             location: Some("会議室A".to_string()),
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -485,6 +499,7 @@ mod tests {
             end: None,
             location: Some("AI 場所".to_string()),
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -553,6 +568,7 @@ mod tests {
         let ai = AiEventParameters {
             title: Some("AI更新タイトル".to_string()),
             date: None, start: None, end: None, location: None, repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -570,6 +586,7 @@ mod tests {
         let ai = AiEventParameters {
             title: Some("AI title".to_string()),
             date: None, start: None, end: None, location: None, repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -592,6 +609,7 @@ mod tests {
             end: Some("9:30".to_string()),
             location: None,
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -614,6 +632,7 @@ mod tests {
             date: None, start: None, end: None,
             location: Some("AI会議室".to_string()),
             repeat_rule: None,
+            reminder: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -623,6 +642,100 @@ mod tests {
             Some(ai),
         ).unwrap();
         assert_eq!(event.location.as_deref(), Some("AI会議室"));
+    }
+
+    // --- map_add_command: AI 通知マージテスト ---
+
+    #[test]
+    fn test_map_add_ai_reminder_used_when_no_cli_reminder() {
+        // CLI に --reminder なし、AI が "popup:10m" を指定 → AI の通知を使用
+        let ai = AiEventParameters {
+            title: Some("MTG".to_string()),
+            date: Some("2026/3/20".to_string()),
+            start: Some("10:00".to_string()),
+            end: None,
+            location: None,
+            repeat_rule: None,
+            reminder: Some("popup:10m".to_string()),
+        };
+        let event = CliMapper::map_add_command(
+            None, None, None, None, "primary".to_string(),
+            None, None, None, None, None, None,
+            None, None, None, // reminder, reminders, location
+            today(),
+            Some(ai),
+        ).unwrap();
+        let rem = event.reminders.unwrap();
+        assert!(!rem.use_default);
+        let overrides = rem.overrides.unwrap();
+        assert_eq!(overrides[0].method, "popup");
+        assert_eq!(overrides[0].minutes, 10);
+    }
+
+    #[test]
+    fn test_map_add_ai_no_reminder_defaults_to_popup_10m() {
+        // AI を使用、reminder フィールドなし → デフォルト popup:10m
+        let ai = AiEventParameters {
+            title: Some("MTG".to_string()),
+            date: Some("2026/3/20".to_string()),
+            start: Some("10:00".to_string()),
+            end: None,
+            location: None,
+            repeat_rule: None,
+            reminder: None, // AI が通知を抽出しなかった
+        };
+        let event = CliMapper::map_add_command(
+            None, None, None, None, "primary".to_string(),
+            None, None, None, None, None, None,
+            None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        let rem = event.reminders.unwrap();
+        assert!(!rem.use_default);
+        let overrides = rem.overrides.unwrap();
+        assert_eq!(overrides[0].method, "popup");
+        assert_eq!(overrides[0].minutes, 10);
+    }
+
+    #[test]
+    fn test_map_add_cli_reminder_overrides_ai_reminder() {
+        // CLI --reminder が AI の通知より優先
+        let ai = AiEventParameters {
+            title: Some("MTG".to_string()),
+            date: Some("2026/3/20".to_string()),
+            start: Some("10:00".to_string()),
+            end: None,
+            location: None,
+            repeat_rule: None,
+            reminder: Some("email:1h".to_string()),
+        };
+        let event = CliMapper::map_add_command(
+            None, None, None, None, "primary".to_string(),
+            None, None, None, None, None, None,
+            Some(vec!["popup:30m".to_string()]), // CLI --reminder
+            None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        let overrides = event.reminders.unwrap().overrides.unwrap();
+        assert_eq!(overrides[0].method, "popup");
+        assert_eq!(overrides[0].minutes, 30);
+    }
+
+    #[test]
+    fn test_map_add_no_ai_no_reminder_is_none() {
+        // AI なし・CLI reminder なし → None（カレンダーデフォルト）
+        let event = CliMapper::map_add_command(
+            Some("MTG".to_string()),
+            Some("2026/3/20 10:00-11:00".to_string()),
+            None, None, "primary".to_string(),
+            None, None, None, None, None, None,
+            None, None, None,
+            today(),
+            None,
+        ).unwrap();
+        assert!(event.reminders.is_none());
     }
 
     #[test]

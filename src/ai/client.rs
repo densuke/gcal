@@ -34,7 +34,8 @@ Schema:
   "start": "string (start time, e.g. '14:00', '午後2時')",
   "end": "string (end time or duration, e.g. '15:00', '+1h')",
   "location": "string (physical location or room)",
-  "repeat_rule": "string (one of: 'daily', 'weekly', 'monthly', 'yearly', or null)"
+  "repeat_rule": "string (one of: 'daily', 'weekly', 'monthly', 'yearly', or null)",
+  "reminder": "string (notification timing, e.g. 'popup:10m', 'popup:30m', 'email:1h'. Use 'popup:10m' if a reminder is mentioned without specific timing. Set to null if no reminder is mentioned.)"
 }
 "#;
 
