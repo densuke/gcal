@@ -1,4 +1,5 @@
 pub mod app;
+pub mod date_parser;
 pub mod auth;
 pub mod cli;
 pub mod config;
