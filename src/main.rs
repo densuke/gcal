@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
 use clap::Parser;
 
 use gcal::app::App;
@@ -7,7 +7,7 @@ use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::config::{Config, FileTokenStore};
-use gcal::date_parser::{parse_date_expr, DateRange};
+use gcal::date_parser::resolve_event_range;
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -48,8 +48,19 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Events { calendar, days, date } => {
-            let (time_min, time_max) = resolve_time_range(date, days)?;
+        Commands::Events { calendar, days, date, from, to } => {
+            let today = Local::now().date_naive();
+            let range = resolve_event_range(
+                date.as_deref(),
+                from.as_deref(),
+                to.as_deref(),
+                days,
+                today,
+            )?;
+
+            let time_min = naive_date_to_utc_start(range.from)?;
+            let time_max = naive_date_to_utc_end(range.to)?;
+
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_events(&calendar, time_min, time_max, &mut out).await?;
@@ -59,36 +70,10 @@ async fn run() -> Result<(), GcalError> {
     Ok(())
 }
 
-/// 日付指定または日数から UTC 時間範囲を計算する
-fn resolve_time_range(
-    date: Option<String>,
-    days: Option<u64>,
-) -> Result<(DateTime<Utc>, DateTime<Utc>), GcalError> {
-    let today = Local::now().date_naive();
-
-    let range = match date {
-        Some(expr) => parse_date_expr(&expr, today)?,
-        None => {
-            let n = days.unwrap_or(7);
-            DateRange {
-                from: today,
-                to: today + Duration::days(n as i64 - 1),
-            }
-        }
-    };
-
-    let time_min = naive_date_to_utc_start(range.from)?;
-    let time_max = naive_date_to_utc_end(range.to)?;
-    Ok((time_min, time_max))
-}
-
 /// NaiveDate の 0:00:00 をローカルタイムとして UTC に変換
 fn naive_date_to_utc_start(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
-    let local_dt = date
-        .and_hms_opt(0, 0, 0)
-        .expect("0:00:00 は常に有効");
     Local
-        .from_local_datetime(&local_dt)
+        .from_local_datetime(&date.and_hms_opt(0, 0, 0).expect("0:00:00 は常に有効"))
         .single()
         .map(|dt| dt.with_timezone(&Utc))
         .ok_or_else(|| GcalError::ConfigError("ローカル時刻の変換に失敗しました".to_string()))
@@ -96,11 +81,8 @@ fn naive_date_to_utc_start(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> 
 
 /// NaiveDate の 23:59:59 をローカルタイムとして UTC に変換
 fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
-    let local_dt = date
-        .and_hms_opt(23, 59, 59)
-        .expect("23:59:59 は常に有効");
     Local
-        .from_local_datetime(&local_dt)
+        .from_local_datetime(&date.and_hms_opt(23, 59, 59).expect("23:59:59 は常に有効"))
         .single()
         .map(|dt| dt.with_timezone(&Utc))
         .ok_or_else(|| GcalError::ConfigError("ローカル時刻の変換に失敗しました".to_string()))
