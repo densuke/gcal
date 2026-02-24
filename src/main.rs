@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
 use clap::Parser;
 
 use gcal::app::App;
@@ -7,7 +7,8 @@ use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::config::{Config, FileTokenStore};
-use gcal::date_parser::resolve_event_range;
+use gcal::date_parser::{parse_datetime_expr, resolve_event_range};
+use gcal::domain::NewEvent;
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -26,9 +27,7 @@ async fn run() -> Result<(), GcalError> {
 
     match cli.command {
         Commands::Init { manual } => {
-            let client_id = prompt("Google OAuth2 Client ID: ")?;
-            let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
-                .map_err(GcalError::IoError)?;
+            let (client_id, client_secret) = resolve_credentials(&config_path)?;
 
             let store = FileTokenStore::new(config_path.clone());
 
@@ -46,6 +45,24 @@ async fn run() -> Result<(), GcalError> {
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_calendars(&mut out).await?;
+        }
+
+        Commands::Add { title, start, end, calendar } => {
+            let today = Local::now().date_naive();
+            let start_dt = parse_datetime_expr(&start, today)?;
+            let end_dt = match end {
+                Some(e) => parse_datetime_expr(&e, today)?,
+                None => start_dt + Duration::hours(1),
+            };
+            let event = NewEvent {
+                summary: title,
+                calendar_id: calendar,
+                start: start_dt,
+                end: end_dt,
+            };
+            let app = build_app(&config_path)?;
+            let mut out = std::io::stdout();
+            app.handle_add_event(event, &mut out).await?;
         }
 
         Commands::Events { calendar, days, date, from, to } => {
@@ -102,6 +119,25 @@ fn build_app(
 fn load_credentials(config_path: &std::path::Path) -> Result<(String, String), GcalError> {
     let config = Config::load(config_path)?;
     Ok((config.credentials.client_id, config.credentials.client_secret))
+}
+
+/// `gcal init` 時に使う認証情報を決定する。
+/// 既存の設定ファイルに client_id が残っていれば表示して再利用を選択できる。
+fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String), GcalError> {
+    if let Ok(config) = Config::load(config_path) {
+        if !config.credentials.client_id.is_empty() {
+            println!("既存の認証情報が見つかりました:");
+            println!("  Client ID: {}", config.credentials.client_id);
+            let answer = prompt("既存の認証情報を使いますか? [Y/n]: ")?;
+            if answer.is_empty() || answer.to_lowercase() == "y" {
+                return Ok((config.credentials.client_id, config.credentials.client_secret));
+            }
+        }
+    }
+    let client_id = prompt("Google OAuth2 Client ID: ")?;
+    let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
+        .map_err(GcalError::IoError)?;
+    Ok((client_id, client_secret))
 }
 
 fn prompt(message: &str) -> Result<String, GcalError> {

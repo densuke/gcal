@@ -1,6 +1,6 @@
 [package]
 name = "gcal"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Google Calendar CLI tool"
 license = "MIT"
@@ -41,6 +41,9 @@ thiserror = "2"
 
 # 日時
 chrono = { version = "0.4", features = ["serde"] }
+
+# タイムゾーン名取得（IANA）
+iana-time-zone = "0.1"
 
 # ターミナル入力（init で秘密情報入力）
 rpassword = "7"

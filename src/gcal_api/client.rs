@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use chrono::NaiveDate;
+use iana_time_zone;
 
-use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary};
+use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent};
 use crate::error::GcalError;
-use crate::gcal_api::models::{CalendarListResponse, EventListResponse};
+use crate::gcal_api::models::{CalendarListResponse, CreateEventRequest, CreateEventResponse, EventListResponse, EventTimeSpec};
 use crate::ports::{CalendarClient, TokenProvider};
 
 const DEFAULT_BASE_URL: &str = "https://www.googleapis.com/calendar/v3";
@@ -122,6 +123,41 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
         }
 
         Ok(events)
+    }
+
+    async fn create_event(&self, event: NewEvent) -> Result<String, GcalError> {
+        let token = self.token_provider.access_token().await?;
+        let url = format!("{}/calendars/{}/events", self.base_url, event.calendar_id);
+
+        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+        let req = CreateEventRequest {
+            summary: event.summary,
+            start: EventTimeSpec {
+                date_time: event.start.to_rfc3339(),
+                time_zone: tz.clone(),
+            },
+            end: EventTimeSpec {
+                date_time: event.end.to_rfc3339(),
+                time_zone: tz,
+            },
+        };
+
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&req)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let message = resp.text().await.unwrap_or_default();
+            return Err(GcalError::ApiError { status, message });
+        }
+
+        let body: CreateEventResponse = resp.json().await?;
+        Ok(body.id)
     }
 }
 
@@ -324,5 +360,90 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].summary, "有効イベント");
+    }
+
+    // --- create_event のテスト ---
+
+    #[tokio::test]
+    async fn test_create_event_returns_id() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/calendars/primary/events"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "created-event-id-123",
+                "summary": "テスト会議"
+            })))
+            .mount(&server)
+            .await;
+
+        use chrono::{Local, TimeZone as _};
+        let start = Local.with_ymd_and_hms(2026, 3, 19, 10, 0, 0).unwrap();
+        let end = Local.with_ymd_and_hms(2026, 3, 19, 11, 0, 0).unwrap();
+
+        let client = make_client(&server.uri());
+        let event = NewEvent {
+            summary: "テスト会議".to_string(),
+            calendar_id: "primary".to_string(),
+            start,
+            end,
+        };
+        let id = client.create_event(event).await.unwrap();
+        assert_eq!(id, "created-event-id-123");
+    }
+
+    #[tokio::test]
+    async fn test_create_event_api_error_401() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": { "message": "Unauthorized" }
+            })))
+            .mount(&server)
+            .await;
+
+        use chrono::{Local, TimeZone as _};
+        let start = Local.with_ymd_and_hms(2026, 3, 19, 10, 0, 0).unwrap();
+        let end = Local.with_ymd_and_hms(2026, 3, 19, 11, 0, 0).unwrap();
+
+        let client = make_client(&server.uri());
+        let event = NewEvent {
+            summary: "テスト".to_string(),
+            calendar_id: "primary".to_string(),
+            start,
+            end,
+        };
+        let result = client.create_event(event).await;
+        assert!(matches!(result, Err(GcalError::ApiError { status: 401, .. })));
+    }
+
+    #[tokio::test]
+    async fn test_create_event_api_error_400() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": { "message": "Bad Request" }
+            })))
+            .mount(&server)
+            .await;
+
+        use chrono::{Local, TimeZone as _};
+        let start = Local.with_ymd_and_hms(2026, 3, 19, 10, 0, 0).unwrap();
+        let end = Local.with_ymd_and_hms(2026, 3, 19, 11, 0, 0).unwrap();
+
+        let client = make_client(&server.uri());
+        let event = NewEvent {
+            summary: "テスト".to_string(),
+            calendar_id: "primary".to_string(),
+            start,
+            end,
+        };
+        let result = client.create_event(event).await;
+        assert!(matches!(result, Err(GcalError::ApiError { status: 400, .. })));
     }
 }

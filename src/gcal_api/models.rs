@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// カレンダーリスト API レスポンス
 #[derive(Debug, Deserialize)]
@@ -33,4 +33,26 @@ pub struct EventStartTime {
     pub date_time: Option<String>,
     /// 終日イベント（YYYY-MM-DD）
     pub date: Option<String>,
+}
+
+/// イベント作成リクエスト
+#[derive(Debug, Serialize)]
+pub struct CreateEventRequest {
+    pub summary: String,
+    pub start: EventTimeSpec,
+    pub end: EventTimeSpec,
+}
+
+/// イベント時刻指定（RFC3339 + IANA タイムゾーン名）
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventTimeSpec {
+    pub date_time: String,
+    pub time_zone: String,
+}
+
+/// イベント作成 API レスポンス
+#[derive(Debug, Deserialize)]
+pub struct CreateEventResponse {
+    pub id: String,
 }
