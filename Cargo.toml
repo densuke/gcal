@@ -2,5 +2,59 @@
 name = "gcal"
 version = "0.1.0"
 edition = "2024"
+description = "Google Calendar CLI tool"
+license = "MIT"
+keywords = ["google", "calendar", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "gcal"
+path = "src/main.rs"
 
 [dependencies]
+# 非同期ランタイム
+tokio = { version = "1", features = ["full"] }
+
+# HTTP クライアント
+reqwest = { version = "0.12", features = ["json"] }
+
+# シリアライズ
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# OAuth2 (PKCE + state サポート)
+oauth2 = "4"
+
+# 非同期トレイト
+async-trait = "0.1"
+
+# 設定ディレクトリ解決
+dirs = "5"
+
+# エラーハンドリング
+anyhow = "1"
+thiserror = "2"
+
+# 日時
+chrono = { version = "0.4", features = ["serde"] }
+
+# ターミナル入力（init で秘密情報入力）
+rpassword = "7"
+
+# ブラウザを開く
+open = "5"
+
+[dev-dependencies]
+# CLI 統合テスト
+assert_cmd = "2"
+predicates = "3"
+
+# ファイルシステム隔離
+tempfile = "3"
+
+# HTTP モックサーバー
+wiremock = "0.6"

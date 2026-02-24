@@ -1,0 +1,217 @@
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::domain::StoredTokens;
+use crate::error::GcalError;
+use crate::ports::TokenStore;
+
+/// 設定ファイル全体の構造
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    pub credentials: Credentials,
+    #[serde(default)]
+    pub token: Option<TokenSection>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Credentials {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSection {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Config {
+    /// デフォルトの設定ファイルパスを返す（~/.config/gcal/config.toml）
+    pub fn default_path() -> Result<PathBuf, GcalError> {
+        let dir = dirs::config_dir()
+            .ok_or_else(|| GcalError::ConfigError("設定ディレクトリが見つかりません".to_string()))?;
+        Ok(dir.join("gcal").join("config.toml"))
+    }
+
+    /// 設定ファイルを読み込む
+    pub fn load(path: &Path) -> Result<Self, GcalError> {
+        if !path.exists() {
+            return Err(GcalError::NotInitialized);
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| GcalError::ConfigError(format!("読み込みエラー: {e}")))?;
+        toml::from_str(&content)
+            .map_err(|e| GcalError::ConfigError(format!("パースエラー: {e}")))
+    }
+
+    /// 設定ファイルに書き込む（親ディレクトリがなければ作成）
+    pub fn save(&self, path: &Path) -> Result<(), GcalError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| GcalError::ConfigError(format!("ディレクトリ作成エラー: {e}")))?;
+        }
+        let content = toml::to_string_pretty(self)
+            .map_err(|e| GcalError::ConfigError(format!("シリアライズエラー: {e}")))?;
+        std::fs::write(path, content)
+            .map_err(|e| GcalError::ConfigError(format!("書き込みエラー: {e}")))
+    }
+}
+
+/// ファイルベースの TokenStore 実装
+pub struct FileTokenStore {
+    path: PathBuf,
+}
+
+impl FileTokenStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl TokenStore for FileTokenStore {
+    fn load_tokens(&self) -> Result<Option<StoredTokens>, GcalError> {
+        match Config::load(&self.path) {
+            Ok(config) => {
+                let tokens = config.token.map(|t| StoredTokens {
+                    access_token: t.access_token,
+                    refresh_token: t.refresh_token,
+                    expires_at: t.expires_at,
+                });
+                Ok(tokens)
+            }
+            Err(GcalError::NotInitialized) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn save_tokens(&self, tokens: &StoredTokens) -> Result<(), GcalError> {
+        // 既存の config を読んで token セクションだけ更新する
+        let mut config = match Config::load(&self.path) {
+            Ok(c) => c,
+            Err(GcalError::NotInitialized) => Config::default(),
+            Err(e) => return Err(e),
+        };
+
+        config.token = Some(TokenSection {
+            access_token: tokens.access_token.clone(),
+            refresh_token: tokens.refresh_token.clone(),
+            expires_at: tokens.expires_at,
+        });
+
+        config.save(&self.path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+    use tempfile::TempDir;
+
+    fn temp_config_path(dir: &TempDir) -> PathBuf {
+        dir.path().join("gcal").join("config.toml")
+    }
+
+    #[test]
+    fn test_load_returns_not_initialized_when_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let result = Config::load(&path);
+        assert!(matches!(result, Err(GcalError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+
+        let config = Config {
+            credentials: Credentials {
+                client_id: "my_client_id".to_string(),
+                client_secret: "my_secret".to_string(),
+            },
+            token: None,
+        };
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.credentials.client_id, "my_client_id");
+        assert_eq!(loaded.credentials.client_secret, "my_secret");
+        assert!(loaded.token.is_none());
+    }
+
+    #[test]
+    fn test_save_creates_parent_directory() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir); // gcal/ ディレクトリはまだ存在しない
+
+        let config = Config::default();
+        config.save(&path).unwrap();
+
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn test_file_token_store_load_returns_none_when_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let store = FileTokenStore::new(path);
+
+        let result = store.load_tokens().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_file_token_store_save_and_load() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let store = FileTokenStore::new(path);
+
+        let expires = Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap();
+        let tokens = StoredTokens {
+            access_token: "acc_token_123".to_string(),
+            refresh_token: Some("ref_token_456".to_string()),
+            expires_at: Some(expires),
+        };
+
+        store.save_tokens(&tokens).unwrap();
+        let loaded = store.load_tokens().unwrap().expect("トークンが存在するはず");
+
+        assert_eq!(loaded.access_token, "acc_token_123");
+        assert_eq!(loaded.refresh_token.as_deref(), Some("ref_token_456"));
+        assert_eq!(loaded.expires_at, Some(expires));
+    }
+
+    #[test]
+    fn test_file_token_store_preserves_credentials_on_save() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+
+        // まず credentials を含む config を作成
+        let config = Config {
+            credentials: Credentials {
+                client_id: "cid".to_string(),
+                client_secret: "csecret".to_string(),
+            },
+            token: None,
+        };
+        config.save(&path).unwrap();
+
+        // token を上書き保存
+        let store = FileTokenStore::new(path.clone());
+        let tokens = StoredTokens {
+            access_token: "new_acc".to_string(),
+            refresh_token: None,
+            expires_at: None,
+        };
+        store.save_tokens(&tokens).unwrap();
+
+        // credentials が消えていないことを確認
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.credentials.client_id, "cid");
+        assert_eq!(loaded.token.unwrap().access_token, "new_acc");
+    }
+}
