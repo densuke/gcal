@@ -56,6 +56,7 @@ pub struct NewEvent {
     pub end: DateTime<Local>,
     pub recurrence: Option<Vec<String>>,
     pub reminders: Option<crate::gcal_api::models::EventReminders>,
+    pub location: Option<String>,
 }
 
 /// 既存イベントの更新内容（None のフィールドは変更しない）
@@ -68,4 +69,5 @@ pub struct UpdateEvent {
     pub end: Option<DateTime<Local>>,
     pub recurrence: Option<Vec<String>>,
     pub reminders: Option<crate::gcal_api::models::EventReminders>,
+    pub location: Option<String>,
 }

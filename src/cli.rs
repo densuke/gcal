@@ -74,6 +74,7 @@ pub enum Commands {
         /// 場所をクリア
         #[arg(long)]
         clear_location: bool,
+
         
         /// 繰り返し設定: daily, weekly, monthly, yearly
         #[arg(long, value_parser = ["daily", "weekly", "monthly", "yearly"])]
@@ -100,6 +101,11 @@ pub enum Commands {
         /// リマインダーのプリセット: default または none
         #[arg(long, conflicts_with = "reminder", value_parser = ["default", "none"])]
         reminders: Option<String>,
+        
+        /// 場所を更新します
+        #[arg(long)]
+        location: Option<String>,
+
         
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
@@ -156,6 +162,10 @@ pub enum Commands {
         /// リマインダーのプリセット: default または none
         #[arg(long, conflicts_with = "reminder", value_parser = ["default", "none"])]
         reminders: Option<String>,
+        
+        /// 場所を設定します（例: 東京タワー, 会議室A）
+        #[arg(long)]
+        location: Option<String>,
         
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]

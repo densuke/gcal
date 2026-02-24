@@ -210,6 +210,7 @@ mod tests {
             end,
             recurrence: None,
             reminders: None,
+            location: None,
         };
 
         let mut out = Vec::new();
@@ -241,6 +242,7 @@ mod tests {
             end: None,
             recurrence: None,
             reminders: None,
+            location: None,
         };
 
         let mut out = Vec::new();

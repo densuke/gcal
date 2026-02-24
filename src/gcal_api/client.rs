@@ -142,6 +142,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             },
             recurrence: event.recurrence,
             reminders: event.reminders,
+            location: event.location,
         };
 
         let resp = self
@@ -182,6 +183,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             }),
             recurrence: event.recurrence,
             reminders: event.reminders,
+            location: event.location,
         };
 
         let resp = self
@@ -451,6 +453,7 @@ mod tests {
             end,
             recurrence: None,
             reminders: None,
+            location: None,
         };
         let id = client.create_event(event).await.unwrap();
         assert_eq!(id, "created-event-id-123");
@@ -480,6 +483,7 @@ mod tests {
             end,
             recurrence: None,
             reminders: None,
+            location: None,
         };
         let result = client.create_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 401, .. })));
@@ -509,6 +513,7 @@ mod tests {
             end,
             recurrence: None,
             reminders: None,
+            location: None,
         };
         let result = client.create_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 400, .. })));
@@ -539,6 +544,7 @@ mod tests {
             end: None,
             recurrence: None,
             reminders: None,
+            location: None,
         };
         client.update_event(event).await.unwrap();
     }
@@ -568,6 +574,7 @@ mod tests {
             end: Some(end),
             recurrence: None,
             reminders: None,
+            location: None,
         };
         client.update_event(event).await.unwrap();
     }
@@ -593,6 +600,7 @@ mod tests {
             end: None,
             recurrence: None,
             reminders: None,
+            location: None,
         };
         let result = client.update_event(event).await;
         assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));

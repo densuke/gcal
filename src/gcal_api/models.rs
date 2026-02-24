@@ -39,6 +39,7 @@ pub struct EventListResponse {
 pub struct EventEntry {
     pub id: Option<String>,
     pub summary: Option<String>,
+    pub location: Option<String>,
     pub start: Option<EventStartTime>,
 }
 
@@ -61,6 +62,8 @@ pub struct CreateEventRequest {
     pub recurrence: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reminders: Option<EventReminders>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }
 
 /// イベント時刻指定（RFC3339 + IANA タイムゾーン名）
@@ -90,4 +93,6 @@ pub struct PatchEventRequest {
     pub recurrence: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reminders: Option<EventReminders>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }

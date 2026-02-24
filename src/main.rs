@@ -47,20 +47,20 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
+        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, .. } => {
             let today = Local::now().date_naive();
             let event = CliMapper::map_add_command(
-                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, today
+                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today
             )?;
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, .. } => {
             let today = Local::now().date_naive();
             let event = CliMapper::map_update_command(
-                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, today
+                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today
             )?;
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();

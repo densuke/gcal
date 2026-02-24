@@ -21,6 +21,7 @@ impl CliMapper {
         recur: Option<Vec<String>>,
         reminder: Option<Vec<String>>,
         reminders: Option<String>,
+        location: Option<String>,
         today: NaiveDate,
     ) -> Result<NewEvent, GcalError> {
         let (start_dt, end_dt) = if let Some(d) = date {
@@ -59,6 +60,7 @@ impl CliMapper {
             end: end_dt,
             recurrence: recurrence_payload,
             reminders: reminders_payload,
+            location,
         })
     }
 
@@ -81,11 +83,12 @@ impl CliMapper {
         recur: Option<Vec<String>>,
         reminder: Option<Vec<String>>,
         reminders: Option<String>,
+        location: Option<String>,
         today: NaiveDate,
     ) -> Result<UpdateEvent, GcalError> {
-        if title.is_none() && start.is_none() && date.is_none() && repeat.is_none() && recur.is_none() && reminder.is_none() && reminders.is_none() && !clear_repeat && !clear_reminders && !clear_location {
+        if title.is_none() && start.is_none() && date.is_none() && repeat.is_none() && recur.is_none() && reminder.is_none() && reminders.is_none() && location.is_none() && !clear_repeat && !clear_reminders && !clear_location {
             return Err(GcalError::ConfigError(
-                "更新する項目 (--title / --start / --date / --repeat / --reminder など) を指定してください".to_string(),
+                "更新する項目 (--title / --start / --date / --location など) を指定してください".to_string(),
             ));
         }
 
@@ -126,6 +129,11 @@ impl CliMapper {
             });
         }
 
+        let mut location_payload = location;
+        if clear_location {
+            location_payload = Some(String::new());
+        }
+
         Ok(UpdateEvent {
             event_id,
             calendar_id: calendar,
@@ -134,6 +142,7 @@ impl CliMapper {
             end: end_dt,
             recurrence: recurrence_payload,
             reminders: reminders_payload,
+            location: location_payload,
         })
     }
 
@@ -197,6 +206,7 @@ mod tests {
             None,
             Some(vec!["popup:10m".to_string()]),
             None,
+            Some("Tokyo Tower".to_string()),
             today
         ).unwrap();
 
@@ -206,6 +216,7 @@ mod tests {
         assert_eq!(event.end.format("%Y-%m-%d %H:%M").to_string(), "2026-05-10 11:00");
         assert_eq!(event.recurrence, Some(vec!["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5".to_string()]));
         assert_eq!(event.reminders.unwrap().overrides.unwrap().len(), 1);
+        assert_eq!(event.location.unwrap(), "Tokyo Tower");
     }
 
     #[test]
@@ -214,13 +225,14 @@ mod tests {
         let event = CliMapper::map_update_command(
             "event_123".to_string(),
             None, None, None, None, "primary".to_string(),
-            true, true, true, None, None, None, None, None, None, None, None, today
+            true, true, true, None, None, None, None, None, None, None, None, None, today
         ).unwrap();
 
         assert_eq!(event.event_id, "event_123");
         assert_eq!(event.title, None);
         assert_eq!(event.recurrence, Some(vec![]));
         assert!(!event.reminders.unwrap().use_default);
+        assert_eq!(event.location.unwrap(), "");
     }
 
     #[test]
