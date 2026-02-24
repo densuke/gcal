@@ -2,8 +2,8 @@ use chrono::Local;
 use clap::Parser;
 
 use gcal::ai::client::OllamaClient;
-use gcal::ai::output::write_ai_params;
 use gcal::ai::types::AiEventParameters;
+use gcal::output::{write_new_event_dry_run, write_update_event_dry_run};
 use gcal::app::App;
 use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
@@ -49,45 +49,35 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, ai_dry_run, .. } => {
+        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
-
-            if ai_dry_run {
-                let params = ai_params.as_ref().ok_or_else(|| {
-                    GcalError::ConfigError("--ai-dry-run には --ai が必要です".to_string())
-                })?;
-                let mut out = std::io::stdout();
-                write_ai_params(params, &mut out)?;
-                return Ok(());
-            }
-
             let event = CliMapper::map_add_command(
                 title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today,
                 ai_params,
             )?;
+            if dry_run {
+                let mut out = std::io::stdout();
+                write_new_event_dry_run(&event, &mut out)?;
+                return Ok(());
+            }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, ai_dry_run, .. } => {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
-
-            if ai_dry_run {
-                let params = ai_params.as_ref().ok_or_else(|| {
-                    GcalError::ConfigError("--ai-dry-run には --ai が必要です".to_string())
-                })?;
-                let mut out = std::io::stdout();
-                write_ai_params(params, &mut out)?;
-                return Ok(());
-            }
-
             let event = CliMapper::map_update_command(
                 event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today,
                 ai_params,
             )?;
+            if dry_run {
+                let mut out = std::io::stdout();
+                write_update_event_dry_run(&event, &mut out)?;
+                return Ok(());
+            }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_update_event(event, &mut out).await?;

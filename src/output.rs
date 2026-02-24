@@ -2,7 +2,7 @@ use std::io::Write;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
 
-use crate::domain::{CalendarSummary, EventStart, EventSummary};
+use crate::domain::{CalendarSummary, EventStart, EventSummary, NewEvent, UpdateEvent};
 use crate::error::GcalError;
 
 /// カレンダー一覧を書き出す
@@ -58,6 +58,37 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
         }
     }
 
+    Ok(())
+}
+
+/// `--dry-run` 時に NewEvent の内容を人間が読める形式で出力する
+pub fn write_new_event_dry_run<W: Write>(event: &NewEvent, out: &mut W) -> Result<(), GcalError> {
+    writeln!(out, "[ドライラン] 以下の内容で登録されます:")?;
+    writeln!(out, "  タイトル:   {}", event.summary)?;
+    writeln!(out, "  開始:       {}", event.start.format("%Y-%m-%d %H:%M"))?;
+    writeln!(out, "  終了:       {}", event.end.format("%Y-%m-%d %H:%M"))?;
+    writeln!(out, "  場所:       {}", event.location.as_deref().unwrap_or("(なし)"))?;
+    match event.recurrence.as_deref() {
+        None | Some([]) => writeln!(out, "  繰り返し:   (なし)")?,
+        Some(rules) => writeln!(out, "  繰り返し:   {}", rules.join(", "))?,
+    }
+    writeln!(out, "  カレンダー: {}", event.calendar_id)?;
+    Ok(())
+}
+
+/// `--dry-run` 時に UpdateEvent の内容を人間が読める形式で出力する
+pub fn write_update_event_dry_run<W: Write>(event: &UpdateEvent, out: &mut W) -> Result<(), GcalError> {
+    writeln!(out, "[ドライラン] 以下の内容で更新されます (ID: {}):", event.event_id)?;
+    writeln!(out, "  タイトル:   {}", event.title.as_deref().unwrap_or("(変更なし)"))?;
+    match (&event.start, &event.end) {
+        (Some(s), Some(e)) => {
+            writeln!(out, "  開始:       {}", s.format("%Y-%m-%d %H:%M"))?;
+            writeln!(out, "  終了:       {}", e.format("%Y-%m-%d %H:%M"))?;
+        }
+        _ => writeln!(out, "  開始/終了:  (変更なし)")?,
+    }
+    writeln!(out, "  場所:       {}", event.location.as_deref().unwrap_or("(変更なし)"))?;
+    writeln!(out, "  カレンダー: {}", event.calendar_id)?;
     Ok(())
 }
 
@@ -225,5 +256,126 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 2, 24).unwrap(); // 火曜
         let s = format_date(date);
         assert_eq!(s, "2026-02-24 (Tue)");
+    }
+
+    // --- write_new_event_dry_run のテスト ---
+
+    fn local_dt(y: i32, m: u32, d: u32, h: u32, min: u32) -> chrono::DateTime<Local> {
+        use chrono::TimeZone;
+        Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap(),
+            )
+            .single()
+            .unwrap()
+    }
+
+    fn base_new_event() -> NewEvent {
+        NewEvent {
+            summary: "チームMTG".to_string(),
+            calendar_id: "primary".to_string(),
+            start: local_dt(2026, 3, 20, 14, 0),
+            end: local_dt(2026, 3, 20, 15, 0),
+            recurrence: None,
+            reminders: None,
+            location: None,
+        }
+    }
+
+    #[test]
+    fn test_dry_run_new_event_shows_title_and_times() {
+        let event = base_new_event();
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("チームMTG"), "タイトルが含まれない: {s}");
+        assert!(s.contains("2026-03-20"), "日付が含まれない: {s}");
+        assert!(s.contains("14:00"), "開始時刻が含まれない: {s}");
+        assert!(s.contains("15:00"), "終了時刻が含まれない: {s}");
+        assert!(s.contains("primary"), "カレンダーIDが含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_new_event_shows_location() {
+        let event = NewEvent { location: Some("会議室A".to_string()), ..base_new_event() };
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("会議室A"), "場所が含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_new_event_no_location_shows_placeholder() {
+        let event = base_new_event(); // location = None
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("(なし)"), "場所なしプレースホルダーが含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_new_event_shows_recurrence() {
+        let event = NewEvent {
+            recurrence: Some(vec!["RRULE:FREQ=WEEKLY".to_string()]),
+            ..base_new_event()
+        };
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("RRULE:FREQ=WEEKLY"), "繰り返しが含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_new_event_has_header() {
+        let event = base_new_event();
+        let mut buf = Vec::new();
+        write_new_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("[ドライラン]"), "ヘッダーが含まれない: {s}");
+    }
+
+    // --- write_update_event_dry_run のテスト ---
+
+    fn base_update_event() -> UpdateEvent {
+        UpdateEvent {
+            event_id: "evt_123".to_string(),
+            calendar_id: "primary".to_string(),
+            title: Some("新タイトル".to_string()),
+            start: Some(local_dt(2026, 3, 20, 14, 0)),
+            end: Some(local_dt(2026, 3, 20, 15, 0)),
+            recurrence: None,
+            reminders: None,
+            location: None,
+        }
+    }
+
+    #[test]
+    fn test_dry_run_update_event_shows_event_id() {
+        let event = base_update_event();
+        let mut buf = Vec::new();
+        write_update_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("evt_123"), "イベントIDが含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_update_event_shows_title_and_times() {
+        let event = base_update_event();
+        let mut buf = Vec::new();
+        write_update_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("新タイトル"), "タイトルが含まれない: {s}");
+        assert!(s.contains("14:00"), "開始時刻が含まれない: {s}");
+        assert!(s.contains("15:00"), "終了時刻が含まれない: {s}");
+    }
+
+    #[test]
+    fn test_dry_run_update_event_none_fields_show_unchanged() {
+        // title=None → "(変更なし)" 表示
+        let event = UpdateEvent { title: None, start: None, end: None, ..base_update_event() };
+        let mut buf = Vec::new();
+        write_update_event_dry_run(&event, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("(変更なし)"), "未変更プレースホルダーが含まれない: {s}");
     }
 }

@@ -110,6 +110,19 @@ pub enum Commands {
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
+
+        /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
+        #[arg(long)]
+        ai: Option<String>,
+        /// AI サーバーのベースURL（設定をオーバーライド）
+        #[arg(long)]
+        ai_url: Option<String>,
+        /// AI への問い合わせ時に使用するモデル（設定をオーバーライド）
+        #[arg(long)]
+        ai_model: Option<String>,
+        /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
+        #[arg(long)]
+        dry_run: bool,
     },
     /// 既存の予定を削除
     Delete {
@@ -124,8 +137,8 @@ pub enum Commands {
     },
     /// Google Calendar に予定を登録
     Add {
-        /// 予定名
-        title: String,
+        /// 予定名（--ai を指定する場合は省略可）
+        title: Option<String>,
         /// 開始〜終了を一括指定（--start / --end と排他）
         /// 例: "今日 12:00", "今日 12:00-13:00", "今日 12:00+1h"
         #[arg(long, conflicts_with_all = ["start", "end"])]
@@ -170,6 +183,19 @@ pub enum Commands {
         /// カレンダーID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
+
+        /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
+        #[arg(long)]
+        ai: Option<String>,
+        /// AI サーバーのベースURL（設定をオーバーライド）
+        #[arg(long)]
+        ai_url: Option<String>,
+        /// AI への問い合わせ時に使用するモデル（設定をオーバーライド）
+        #[arg(long)]
+        ai_model: Option<String>,
+        /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
