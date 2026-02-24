@@ -83,7 +83,13 @@ impl CliMapper {
             parse_reminders(reminder, reminders.as_deref())?
         } else if let Some(ref ai) = ai_params {
             let ai_reminder_str = ai.reminder.as_deref().unwrap_or("popup:10m");
-            parse_reminders(Some(vec![ai_reminder_str.to_string()]), None)?
+            // AI がカンマ区切りで複数の reminder を返す場合があるため分割する
+            let ai_reminders: Vec<String> = ai_reminder_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            parse_reminders(Some(ai_reminders), None)?
         } else {
             None
         };
@@ -736,6 +742,33 @@ mod tests {
             None,
         ).unwrap();
         assert!(event.reminders.is_none());
+    }
+
+    #[test]
+    fn test_map_add_ai_multiple_reminders_comma_separated() {
+        // AI がカンマ区切りで複数 reminder を返した場合、全て解析される
+        let ai = AiEventParameters {
+            title: Some("MTG".to_string()),
+            date: Some("2026/3/20".to_string()),
+            start: Some("15:00".to_string()),
+            end: None,
+            location: None,
+            repeat_rule: None,
+            reminder: Some("popup:15m, popup:120m".to_string()),
+        };
+        let event = CliMapper::map_add_command(
+            None, None, None, None, "primary".to_string(),
+            None, None, None, None, None, None,
+            None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        let overrides = event.reminders.unwrap().overrides.unwrap();
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides[0].method, "popup");
+        assert_eq!(overrides[0].minutes, 15);
+        assert_eq!(overrides[1].method, "popup");
+        assert_eq!(overrides[1].minutes, 120);
     }
 
     #[test]
