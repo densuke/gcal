@@ -69,6 +69,7 @@ async fn run() -> Result<(), GcalError> {
         Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            let used_ai = ai_params.is_some();
             // calendar: CLI > AI > "primary"、その後エイリアス解決
             let raw_calendar = calendar
                 .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
@@ -83,6 +84,16 @@ async fn run() -> Result<(), GcalError> {
                 write_new_event_dry_run(&event, &mut out)?;
                 return Ok(());
             }
+            // AI 使用時は登録内容を表示して確認を求める
+            if used_ai {
+                let mut out = std::io::stdout();
+                write_new_event_dry_run(&event, &mut out)?;
+                let answer = prompt("この内容で登録しますか? [y/N]: ")?;
+                if answer.to_lowercase() != "y" {
+                    println!("キャンセルしました");
+                    return Ok(());
+                }
+            }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
@@ -91,6 +102,7 @@ async fn run() -> Result<(), GcalError> {
         Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            let used_ai = ai_params.is_some();
             // calendar: CLI > AI > "primary"、その後エイリアス解決
             let raw_calendar = calendar
                 .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
@@ -104,6 +116,16 @@ async fn run() -> Result<(), GcalError> {
                 let mut out = std::io::stdout();
                 write_update_event_dry_run(&event, &mut out)?;
                 return Ok(());
+            }
+            // AI 使用時は更新内容を表示して確認を求める
+            if used_ai {
+                let mut out = std::io::stdout();
+                write_update_event_dry_run(&event, &mut out)?;
+                let answer = prompt("この内容で更新しますか? [y/N]: ")?;
+                if answer.to_lowercase() != "y" {
+                    println!("キャンセルしました");
+                    return Ok(());
+                }
             }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
