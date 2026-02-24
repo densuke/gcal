@@ -127,6 +127,9 @@ pub enum Commands {
         /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
         #[arg(long)]
         dry_run: bool,
+        /// --ai 使用時の確認プロンプトをスキップして即時実行
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// 既存の予定を削除
     Delete {
@@ -201,6 +204,9 @@ pub enum Commands {
         /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
         #[arg(long)]
         dry_run: bool,
+        /// --ai 使用時の確認プロンプトをスキップして即時実行
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 

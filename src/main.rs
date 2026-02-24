@@ -66,7 +66,7 @@ async fn run() -> Result<(), GcalError> {
             }
         }
 
-        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
+        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, yes, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
@@ -84,8 +84,8 @@ async fn run() -> Result<(), GcalError> {
                 write_new_event_dry_run(&event, &mut out)?;
                 return Ok(());
             }
-            // AI 使用時は登録内容を表示して確認を求める
-            if used_ai {
+            // AI 使用時は登録内容を表示して確認を求める（--yes でスキップ）
+            if used_ai && !yes {
                 let mut out = std::io::stdout();
                 write_new_event_dry_run(&event, &mut out)?;
                 let answer = prompt("この内容で登録しますか? [y/N]: ")?;
@@ -99,7 +99,7 @@ async fn run() -> Result<(), GcalError> {
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, yes, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
@@ -117,8 +117,8 @@ async fn run() -> Result<(), GcalError> {
                 write_update_event_dry_run(&event, &mut out)?;
                 return Ok(());
             }
-            // AI 使用時は更新内容を表示して確認を求める
-            if used_ai {
+            // AI 使用時は更新内容を表示して確認を求める（--yes でスキップ）
+            if used_ai && !yes {
                 let mut out = std::io::stdout();
                 write_update_event_dry_run(&event, &mut out)?;
                 let answer = prompt("この内容で更新しますか? [y/N]: ")?;
