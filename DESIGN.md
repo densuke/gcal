@@ -61,11 +61,13 @@ gcal delete <event_id>             # 予定の削除
 **`gcal add`**
 - 対象カレンダーに新しいイベントを作成する（`/calendars/{id}/events` への POST リクエスト）
 - 必須引数: イベント名 (`title`)
-- 指定オプション: `--date` (範囲指定), `--start`, `--end` を利用して日時を柔軟に設定可能
+- 時間の指定オプション: `--date` (範囲指定), `--start`, `--end` を利用して日時を柔軟に設定可能
+- 繰り返し・通知の指定（後述の「高度な入力パース」参照）
 
 **`gcal update`**
 - 既存のイベントを更新する（`/calendars/{id}/events/{eventId}` への PUT リクエスト）
 - オプション: `--title`, `--start`, `--end`, `--date` を用いて一部または全てを更新可能
+- 繰り返し・通知の更新: `--clear-repeat`, `--clear-reminders` によるクリアや、新たなルールの適用が可能
 - 更新対象のイベントIDを必須とする
 
 **`gcal delete`**
@@ -81,7 +83,35 @@ CLIに入力される自然言語の日付や相対時間を解析し、`DateRan
 - **相対日付**: `N日後`, `N週間後`
 - **スラッシュ/日本語表記**: `MM/DD`, `YYYY/MM/DD`, `MM月DD日`, `YYYY年MM月DD日`
 - **相対時間指定 (`--end`)**: `+1h`, `+30m`, `+1h30m` などの形式で終了時間を指定
-- **日時範囲のパース (`--date`)**: `"今日 12:00-13:00"`, `"明日 10:00+1h"` など、開始と終了を一括で解析
+**日時範囲のパース (`--date`)**: `"今日 12:00-13:00"`, `"明日 10:00+1h"` など、開始と終了を一括で解析
+
+---
+
+## 高度な入力パース (v0.3.x追加予定)
+
+### 繰り返し予定 (Recurrence)
+Google Calendar の `recurrence` (RRULE形式の配列) に対し、ユーザーフレンドリーなDSLと生指定（エスケープハッチ）の2層構造を提供します。
+- **シンプルなDSL**:
+  - `--repeat <daily|weekly|monthly|yearly>`
+  - `--every <N>` （例: 2週間ごとの場合 `--repeat weekly --every 2`）
+  - `--on <mon,tue...>` （例: 毎週月・水曜日の場合 `--repeat weekly --on mon,wed`）
+  - `--until <DATE>` または `--count <N>` 終了条件
+- **生指定（エスケープハッチ）**:
+  - `--recur "RRULE:FREQ=WEEKLY;UNTIL=20261231..."` (複数指定可)
+- **更新時のクリア**:
+  - `--clear-repeat` (既存予定から繰り返しを削除)
+
+### 通知・リマインダー (Reminders)
+Google Calendar の `reminders` オブジェクトに対して、複数条件を直感的に指定できるようにします。
+- **通知オーバーライド指定 (`--reminder`)**:
+  - `メソッド:オフセット` フォーマットで指定（例: `--reminder popup:10m`, `--reminder email:1d`）
+  - カンマ区切りおよび複数フラグの両方に対応
+  - 時間単位: `m` (分), `h` (時間), `d` (日), `w` (週) をパースして分(minutes)に変換
+- **プリセット指定 (`--reminders`)**:
+  - `--reminders default` (カレンダーのデフォルト通知を利用)
+  - `--reminders none` (通知なし)
+- **更新時のクリア**:
+  - `--clear-reminders` 
 
 ---
 
