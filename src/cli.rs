@@ -22,8 +22,14 @@ pub enum Commands {
         /// 対象カレンダーの ID（デフォルト: primary）
         #[arg(long, default_value = "primary")]
         calendar: String,
-        /// 取得する日数（デフォルト: 7日）
-        #[arg(long, default_value_t = 7)]
-        days: u64,
+
+        /// 取得する日数（--date と同時指定不可）
+        #[arg(long, conflicts_with = "date")]
+        days: Option<u64>,
+
+        /// 日付・期間を自然言語で指定（--days と同時指定不可）
+        /// 例: 今日, 明日, 来週, 今月, 3/19, 3月19日, 2026/3/19, 3日後, 2週間後
+        #[arg(long, conflicts_with = "days")]
+        date: Option<String>,
     },
 }
