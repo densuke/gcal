@@ -13,6 +13,8 @@ pub struct Config {
     pub credentials: Credentials,
     #[serde(default)]
     pub token: Option<TokenSection>,
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -26,6 +28,36 @@ pub struct TokenSection {
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    #[serde(default = "default_ai_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_ai_model")]
+    pub model: String,
+    #[serde(default = "default_ai_enabled")]
+    pub enabled: bool,
+}
+
+fn default_ai_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_ai_model() -> String {
+    "gemma3:4b".to_string()
+}
+fn default_ai_enabled() -> bool {
+    true
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_ai_base_url(),
+            model: default_ai_model(),
+            enabled: default_ai_enabled(),
+        }
+    }
 }
 
 impl Config {
@@ -115,6 +147,39 @@ mod tests {
         dir.path().join("gcal").join("config.toml")
     }
 
+    // --- AiConfig のデフォルト値テスト ---
+
+    #[test]
+    fn test_ai_config_default_model_is_gemma3() {
+        assert_eq!(AiConfig::default().model, "gemma3:4b");
+    }
+
+    #[test]
+    fn test_ai_config_default_base_url() {
+        assert_eq!(AiConfig::default().base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_ai_config_default_enabled() {
+        assert!(AiConfig::default().enabled);
+    }
+
+    #[test]
+    fn test_config_load_without_ai_section_uses_defaults() {
+        // v0.4.0 以前の設定ファイル（[ai] セクションなし）を読んでもデフォルト値が入る
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.ai.base_url, "http://localhost:11434");
+        assert_eq!(config.ai.model, "gemma3:4b");
+        assert!(config.ai.enabled);
+    }
+
     #[test]
     fn test_load_returns_not_initialized_when_missing() {
         let dir = TempDir::new().unwrap();
@@ -134,6 +199,7 @@ mod tests {
                 client_secret: "my_secret".to_string(),
             },
             token: None,
+            ai: AiConfig::default(),
         };
         config.save(&path).unwrap();
 
@@ -197,6 +263,7 @@ mod tests {
                 client_secret: "csecret".to_string(),
             },
             token: None,
+            ai: AiConfig::default(),
         };
         config.save(&path).unwrap();
 

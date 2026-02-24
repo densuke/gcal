@@ -10,7 +10,7 @@ use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::cli_mapper::CliMapper;
-use gcal::config::{Config, FileTokenStore};
+use gcal::config::{AiConfig, Config, FileTokenStore};
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -30,16 +30,17 @@ async fn run() -> Result<(), GcalError> {
     match cli.command {
         Commands::Init { manual } => {
             let (client_id, client_secret) = resolve_credentials(&config_path)?;
+            let ai_config = resolve_ai_config(&config_path)?;
 
             let store = FileTokenStore::new(config_path.clone());
 
             if manual {
                 let receiver = ManualReceiver::new(std::io::BufReader::new(std::io::stdin()));
                 println!("認証後にリダイレクトされた URL を貼り付けてください:");
-                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret).await?;
+                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret, ai_config).await?;
             } else {
                 let receiver = LoopbackReceiver::bind()?;
-                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret).await?;
+                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret, ai_config).await?;
             }
         }
 
@@ -147,6 +148,24 @@ fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String)
     let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
         .map_err(GcalError::IoError)?;
     Ok((client_id, client_secret))
+}
+
+/// `gcal init` 時に AI 設定をプロンプトで確認・設定する
+///
+/// 既存の設定があればその値を、なければデフォルト値を角括弧内に表示し、
+/// Enter のみで確定（変更不要な場合はそのまま Enter）。
+fn resolve_ai_config(config_path: &std::path::Path) -> Result<AiConfig, GcalError> {
+    let existing = Config::load(config_path).map(|c| c.ai).unwrap_or_default();
+
+    println!("\nAI設定 (Ollama):");
+
+    let base_url_input = prompt(&format!("  サーバーURL [{}]: ", existing.base_url))?;
+    let base_url = if base_url_input.is_empty() { existing.base_url } else { base_url_input };
+
+    let model_input = prompt(&format!("  使用モデル  [{}]: ", existing.model))?;
+    let model = if model_input.is_empty() { existing.model } else { model_input };
+
+    Ok(AiConfig { base_url, model, enabled: existing.enabled })
 }
 
 /// `--ai` フラグが指定されていれば Ollama に問い合わせて AiEventParameters を返す

@@ -4,7 +4,7 @@ use oauth2::{
     Scope, TokenUrl,
 };
 
-use crate::config::{Config, Credentials};
+use crate::config::{AiConfig, Config, Credentials};
 use crate::domain::StoredTokens;
 use crate::error::GcalError;
 use crate::ports::{AuthCodeReceiver, BrowserOpener, TokenStore};
@@ -21,6 +21,7 @@ pub async fn run_init(
     config_path: &std::path::Path,
     client_id: String,
     client_secret: String,
+    ai: AiConfig,
 ) -> Result<(), GcalError> {
     let redirect_uri = receiver.redirect_uri();
     let oauth_client = build_oauth_client(&client_id, &client_secret, redirect_uri)?;
@@ -68,13 +69,14 @@ pub async fn run_init(
         expires_at,
     };
 
-    // credentials と token を保存
+    // credentials と token を保存（AI 設定も含める）
     let config = Config {
         credentials: Credentials {
             client_id: client_id.clone(),
             client_secret: client_secret.clone(),
         },
         token: None,
+        ai,
     };
     config.save(config_path)?;
     store.save_tokens(&tokens)?;
