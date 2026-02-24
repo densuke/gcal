@@ -341,6 +341,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -363,6 +364,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             Some("CLI title".to_string()),
@@ -388,6 +390,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -411,6 +414,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -434,6 +438,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None,
@@ -459,6 +464,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let result = CliMapper::map_add_command(
             None, None, None, None,
@@ -483,6 +489,7 @@ mod tests {
             location: Some("会議室A".to_string()),
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -506,6 +513,7 @@ mod tests {
             location: Some("AI 場所".to_string()),
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None,
@@ -575,6 +583,7 @@ mod tests {
             title: Some("AI更新タイトル".to_string()),
             date: None, start: None, end: None, location: None, repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -593,6 +602,7 @@ mod tests {
             title: Some("AI title".to_string()),
             date: None, start: None, end: None, location: None, repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -616,6 +626,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -639,6 +650,7 @@ mod tests {
             location: Some("AI会議室".to_string()),
             repeat_rule: None,
             reminder: None,
+            calendar: None,
         };
         let event = CliMapper::map_update_command(
             "evt_1".to_string(),
@@ -663,6 +675,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: Some("popup:10m".to_string()),
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None, "primary".to_string(),
@@ -689,6 +702,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: None, // AI が通知を抽出しなかった
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None, "primary".to_string(),
@@ -715,6 +729,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: Some("email:1h".to_string()),
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None, "primary".to_string(),
@@ -755,6 +770,7 @@ mod tests {
             location: None,
             repeat_rule: None,
             reminder: Some("popup:15m, popup:120m".to_string()),
+            calendar: None,
         };
         let event = CliMapper::map_add_command(
             None, None, None, None, "primary".to_string(),

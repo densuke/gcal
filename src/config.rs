@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,17 @@ pub struct Config {
     pub token: Option<TokenSection>,
     #[serde(default)]
     pub ai: AiConfig,
+    /// カレンダーエイリアス: エイリアス名 → Google カレンダー ID
+    #[serde(default)]
+    pub calendars: HashMap<String, String>,
+}
+
+impl Config {
+    /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
+    /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
+    pub fn resolve_calendar_id(&self, input: &str) -> String {
+        self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -200,6 +212,7 @@ mod tests {
             },
             token: None,
             ai: AiConfig::default(),
+            calendars: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -264,6 +277,7 @@ mod tests {
             },
             token: None,
             ai: AiConfig::default(),
+            calendars: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -280,5 +294,62 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.credentials.client_id, "cid");
         assert_eq!(loaded.token.unwrap().access_token, "new_acc");
+    }
+
+    // --- resolve_calendar_id のテスト ---
+
+    #[test]
+    fn test_resolve_calendar_known_alias() {
+        let mut config = Config::default();
+        config.calendars.insert("仕事".to_string(), "work@group.calendar.google.com".to_string());
+        assert_eq!(config.resolve_calendar_id("仕事"), "work@group.calendar.google.com");
+    }
+
+    #[test]
+    fn test_resolve_calendar_primary_passthrough() {
+        let config = Config::default();
+        assert_eq!(config.resolve_calendar_id("primary"), "primary");
+    }
+
+    #[test]
+    fn test_resolve_calendar_unknown_returns_input() {
+        let config = Config::default(); // エイリアスなし
+        assert_eq!(config.resolve_calendar_id("unknown_alias"), "unknown_alias");
+    }
+
+    #[test]
+    fn test_resolve_calendar_raw_id_passthrough() {
+        let config = Config::default();
+        assert_eq!(
+            config.resolve_calendar_id("abc@group.calendar.google.com"),
+            "abc@group.calendar.google.com",
+        );
+    }
+
+    #[test]
+    fn test_config_load_without_calendars_section_uses_empty_map() {
+        // v0.5.x 以前の設定ファイル（[calendars] セクションなし）でも空 HashMap になる
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.calendars.is_empty());
+    }
+
+    #[test]
+    fn test_config_save_and_load_with_calendars() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let mut config = Config::default();
+        config.credentials = Credentials { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+        config.calendars.insert("仕事".to_string(), "work@google.com".to_string());
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.calendars.get("仕事").map(|s| s.as_str()), Some("work@google.com"));
     }
 }

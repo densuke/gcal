@@ -15,8 +15,11 @@ pub enum Commands {
         #[arg(long)]
         manual: bool,
     },
-    /// カレンダーの一覧を表示
-    Calendars,
+    /// カレンダーの操作（引数なしで一覧表示）
+    Calendars {
+        #[command(subcommand)]
+        sub: Option<CalendarSubcommands>,
+    },
     /// 直近のイベントを表示
     Events {
         /// 対象カレンダーの ID（デフォルト: primary）
@@ -107,9 +110,10 @@ pub enum Commands {
         location: Option<String>,
 
         
-        /// カレンダーID（デフォルト: primary）
-        #[arg(long, default_value = "primary")]
-        calendar: String,
+        /// カレンダーID またはエイリアス（例: 仕事, 個人、デフォルト: primary）
+        /// --ai 使用時は AI がプロンプトから推定したカレンダーを補完します
+        #[arg(long)]
+        calendar: Option<String>,
 
         /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
         #[arg(long)]
@@ -180,9 +184,10 @@ pub enum Commands {
         #[arg(long)]
         location: Option<String>,
         
-        /// カレンダーID（デフォルト: primary）
-        #[arg(long, default_value = "primary")]
-        calendar: String,
+        /// カレンダーID またはエイリアス（例: 仕事, 個人、デフォルト: primary）
+        /// --ai 使用時は AI がプロンプトから推定したカレンダーを補完します
+        #[arg(long)]
+        calendar: Option<String>,
 
         /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
         #[arg(long)]
@@ -196,6 +201,24 @@ pub enum Commands {
         /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CalendarSubcommands {
+    /// カレンダーエイリアスを追加または更新（例: gcal calendars alias 仕事 <ID>）
+    Alias {
+        /// エイリアス名（例: 仕事, 個人, g）
+        name: String,
+        /// Google カレンダー ID
+        calendar_id: String,
+    },
+    /// 設定済みエイリアス一覧を表示
+    Aliases,
+    /// エイリアスを削除（例: gcal calendars unalias 仕事）
+    Unalias {
+        /// エイリアス名
+        name: String,
     },
 }
 

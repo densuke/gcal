@@ -4,11 +4,11 @@ use clap::Parser;
 use gcal::ai::client::OllamaClient;
 use gcal::ai::types::AiEventParameters;
 use gcal::output::{write_new_event_dry_run, write_update_event_dry_run};
-use gcal::app::App;
+use gcal::app::{handle_list_aliases, handle_remove_alias, handle_set_alias, App};
 use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
-use gcal::cli::{Cli, Commands};
+use gcal::cli::{CalendarSubcommands, Cli, Commands};
 use gcal::cli_mapper::CliMapper;
 use gcal::config::{AiConfig, Config, FileTokenStore};
 use gcal::error::GcalError;
@@ -44,17 +44,38 @@ async fn run() -> Result<(), GcalError> {
             }
         }
 
-        Commands::Calendars => {
-            let app = build_app(&config_path)?;
-            let mut out = std::io::stdout();
-            app.handle_calendars(&mut out).await?;
+        Commands::Calendars { sub } => {
+            match sub {
+                None => {
+                    let app = build_app(&config_path)?;
+                    let mut out = std::io::stdout();
+                    app.handle_calendars(&mut out).await?;
+                }
+                Some(CalendarSubcommands::Alias { name, calendar_id }) => {
+                    let mut out = std::io::stdout();
+                    handle_set_alias(&config_path, &name, &calendar_id, &mut out)?;
+                }
+                Some(CalendarSubcommands::Aliases) => {
+                    let mut out = std::io::stdout();
+                    handle_list_aliases(&config_path, &mut out)?;
+                }
+                Some(CalendarSubcommands::Unalias { name }) => {
+                    let mut out = std::io::stdout();
+                    handle_remove_alias(&config_path, &name, &mut out)?;
+                }
+            }
         }
 
         Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            // calendar: CLI > AI > "primary"、その後エイリアス解決
+            let raw_calendar = calendar
+                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
+                .unwrap_or_else(|| "primary".to_string());
+            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
             let event = CliMapper::map_add_command(
-                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today,
+                title, date, start, end, calendar_id, repeat, every, on, until, count, recur, reminder, reminders, location, today,
                 ai_params,
             )?;
             if dry_run {
@@ -70,8 +91,13 @@ async fn run() -> Result<(), GcalError> {
         Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, dry_run, .. } => {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+            // calendar: CLI > AI > "primary"、その後エイリアス解決
+            let raw_calendar = calendar
+                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
+                .unwrap_or_else(|| "primary".to_string());
+            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
             let event = CliMapper::map_update_command(
-                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today,
+                event_id, title, date, start, end, calendar_id, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today,
                 ai_params,
             )?;
             if dry_run {
@@ -85,6 +111,7 @@ async fn run() -> Result<(), GcalError> {
         }
 
         Commands::Delete { event_id, force, calendar } => {
+            let calendar_id = resolve_calendar(&config_path, &calendar);
             if !force {
                 let answer = prompt(&format!(
                     "イベント (ID: {}) を削除しますか? [y/N]: ",
@@ -97,10 +124,11 @@ async fn run() -> Result<(), GcalError> {
             }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_delete_event(&calendar, &event_id, &mut out).await?;
+            app.handle_delete_event(&calendar_id, &event_id, &mut out).await?;
         }
 
         Commands::Events { calendar, days, date, from, to, ids } => {
+            let calendar_id = resolve_calendar(&config_path, &calendar);
             let today = Local::now().date_naive();
             let (time_min, time_max) = CliMapper::map_events_command(
                 date, from, to, days.map(|x| x as u64), today
@@ -108,11 +136,27 @@ async fn run() -> Result<(), GcalError> {
 
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_events(&calendar, time_min, time_max, ids, &mut out).await?;
+            app.handle_events(&calendar_id, time_min, time_max, ids, &mut out).await?;
         }
     }
 
     Ok(())
+}
+
+/// カレンダーエイリアスを Google カレンダー ID に解決する。
+/// エイリアス一覧に存在しない場合は入力をそのまま返す。
+/// ただしエイリアスが1件以上設定されていて、かつ入力が "@" を含まず
+/// "primary" でもない場合は警告を stderr に出力して "primary" を返す。
+fn resolve_calendar(config_path: &std::path::Path, input: &str) -> String {
+    let config = Config::load(config_path).unwrap_or_default();
+    let resolved = config.resolve_calendar_id(input);
+    if resolved == input && !input.contains('@') && input != "primary" && !config.calendars.is_empty() {
+        // TODO: 将来的には「unknown alias → 作成後に別カレンダーへ移動」機能を追加
+        eprintln!("警告: 未知のカレンダーエイリアス '{}' → primary を使用します", input);
+        eprintln!("      `gcal calendars aliases` でエイリアス一覧を確認できます");
+        return "primary".to_string();
+    }
+    resolved
 }
 
 /// API クライアントと App を組み立てる
@@ -171,7 +215,7 @@ fn resolve_ai_config(config_path: &std::path::Path) -> Result<AiConfig, GcalErro
 /// `--ai` フラグが指定されていれば Ollama に問い合わせて AiEventParameters を返す
 ///
 /// `--ai-url` / `--ai-model` は config の値を上書きする。
-/// config が存在しない場合はデフォルト値（localhost:11434 / llama3）を使用。
+/// config が存在しない場合はデフォルト値（localhost:11434 / gemma3:4b）を使用。
 async fn resolve_ai_params(
     ai_prompt: Option<String>,
     ai_url: Option<String>,

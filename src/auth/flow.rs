@@ -77,6 +77,7 @@ pub async fn run_init(
         },
         token: None,
         ai,
+        calendars: Default::default(),
     };
     config.save(config_path)?;
     store.save_tokens(&tokens)?;
