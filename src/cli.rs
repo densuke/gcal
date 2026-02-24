@@ -42,4 +42,18 @@ pub enum Commands {
         #[arg(long, conflicts_with_all = ["date", "days"])]
         to: Option<String>,
     },
+    /// Google Calendar に予定を登録
+    Add {
+        /// 予定名
+        title: String,
+        /// 開始日時（例: "今日 14:00", "3/19 10:00"）
+        #[arg(long)]
+        start: String,
+        /// 終了日時（省略時: 開始 +1時間）
+        #[arg(long)]
+        end: Option<String>,
+        /// カレンダーID（デフォルト: primary）
+        #[arg(long, default_value = "primary")]
+        calendar: String,
+    },
 }

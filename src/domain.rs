@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 
 /// カレンダーの概要情報
@@ -45,4 +45,13 @@ pub struct StoredTokens {
 pub struct OAuthCallback {
     pub code: String,
     pub state: String,
+}
+
+/// 新規作成するイベント
+#[derive(Debug, Clone)]
+pub struct NewEvent {
+    pub summary: String,
+    pub calendar_id: String,
+    pub start: DateTime<Local>,
+    pub end: DateTime<Local>,
 }

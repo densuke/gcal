@@ -1,4 +1,4 @@
-use chrono::{Datelike, Duration, NaiveDate, Weekday};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Weekday};
 
 use crate::error::GcalError;
 
@@ -248,6 +248,47 @@ pub fn resolve_event_range(
         from: today,
         to: today + Duration::days(n as i64 - 1),
     })
+}
+
+// ============================================================
+// 日時（日付 + 時刻）パース
+// ============================================================
+
+/// "今日 14:00" や "3/19 10:00" など、"<日付表現> HH:MM" 形式の入力を
+/// DateTime<Local> に変換する
+///
+/// `today` を引数で受け取ることでテストが固定時刻で動く
+pub fn parse_datetime_expr(input: &str, today: NaiveDate) -> Result<DateTime<Local>, GcalError> {
+    let s = input.trim();
+
+    // 末尾の "HH:MM" を分離する
+    // 末尾が "HH:MM" または "H:MM" パターンと仮定し、最後のスペースで分割
+    let (date_part, time_part) = s.rsplit_once(' ').ok_or_else(|| {
+        GcalError::ConfigError(format!(
+            "日時の形式が不正です: '{input}'\n\
+             例: \"今日 14:00\", \"3/19 10:00\", \"2026/3/19 09:30\""
+        ))
+    })?;
+
+    // 時刻部分をパース
+    let time = NaiveTime::parse_from_str(time_part, "%H:%M").map_err(|_| {
+        GcalError::ConfigError(format!(
+            "時刻の形式が不正です: '{time_part}'\n例: \"14:00\", \"9:30\""
+        ))
+    })?;
+
+    // 日付部分をパース（DateRange の from を使う）
+    let range = parse_date_expr(date_part, today)?;
+    let date = range.from;
+
+    // NaiveDateTime → DateTime<Local>
+    let naive_dt = date.and_time(time);
+    Local
+        .from_local_datetime(&naive_dt)
+        .single()
+        .ok_or_else(|| {
+            GcalError::ConfigError(format!("ローカル時刻の変換に失敗しました: '{input}'"))
+        })
 }
 
 // ============================================================
@@ -509,5 +550,63 @@ mod tests {
         let r = resolve_event_range(None, Some("明日"), Some("来週"), None, today()).unwrap();
         // 明日=2/25、来週 の from=3/2
         assert_eq!(r, range(date(2026, 2, 25), date(2026, 3, 2)));
+    }
+
+    // --- parse_datetime_expr のテスト ---
+
+    #[test]
+    fn test_datetime_today() {
+        let dt = parse_datetime_expr("今日 14:00", today()).unwrap();
+        assert_eq!(dt.date_naive(), date(2026, 2, 24));
+        assert_eq!(dt.format("%H:%M").to_string(), "14:00");
+    }
+
+    #[test]
+    fn test_datetime_tomorrow() {
+        let dt = parse_datetime_expr("明日 9:30", today()).unwrap();
+        assert_eq!(dt.date_naive(), date(2026, 2, 25));
+        assert_eq!(dt.format("%H:%M").to_string(), "09:30");
+    }
+
+    #[test]
+    fn test_datetime_month_day_slash() {
+        let dt = parse_datetime_expr("3/19 10:00", today()).unwrap();
+        assert_eq!(dt.date_naive(), date(2026, 3, 19));
+        assert_eq!(dt.format("%H:%M").to_string(), "10:00");
+    }
+
+    #[test]
+    fn test_datetime_full_date() {
+        let dt = parse_datetime_expr("2026/3/19 10:00", today()).unwrap();
+        assert_eq!(dt.date_naive(), date(2026, 3, 19));
+        assert_eq!(dt.format("%H:%M").to_string(), "10:00");
+    }
+
+    #[test]
+    fn test_datetime_japanese_month_day() {
+        let dt = parse_datetime_expr("3月19日 10:00", today()).unwrap();
+        assert_eq!(dt.date_naive(), date(2026, 3, 19));
+        assert_eq!(dt.format("%H:%M").to_string(), "10:00");
+    }
+
+    #[test]
+    fn test_datetime_no_time_returns_error() {
+        // 時刻なし → エラー
+        let result = parse_datetime_expr("今日", today());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_datetime_invalid_time_returns_error() {
+        // 不正な時刻 → エラー
+        let result = parse_datetime_expr("今日 25:00", today());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_datetime_invalid_date_returns_error() {
+        // 不正な日付 → エラー
+        let result = parse_datetime_expr("来年 10:00", today());
+        assert!(result.is_err());
     }
 }

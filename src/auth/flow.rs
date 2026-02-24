@@ -11,7 +11,7 @@ use crate::ports::{AuthCodeReceiver, BrowserOpener, TokenStore};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const CALENDAR_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar";
 
 /// `gcal init` コマンドの実行ロジック
 pub async fn run_init(
@@ -29,10 +29,11 @@ pub async fn run_init(
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (auth_url, csrf_token) = oauth_client
         .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new(CALENDAR_READONLY_SCOPE.to_string()))
+        .add_scope(Scope::new(CALENDAR_SCOPE.to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
 
+    println!("⚠ 書き込みスコープを要求します。既存のトークンがある場合は上書きされます。");
     println!("ブラウザで認証を行ってください...");
     browser.open(auth_url.as_str())?;
 
