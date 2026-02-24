@@ -199,6 +199,58 @@ fn normalize(s: &str) -> String {
 }
 
 // ============================================================
+// --from / --to / --date / --days の組み合わせ解決
+// ============================================================
+
+/// CLI 引数の組み合わせから DateRange を解決する
+///
+/// 優先順位:
+///   1. `--date` → parse_date_expr で解決
+///   2. `--from` / `--to`（片方のみでも可）
+///   3. `--days`（デフォルト 7）
+///
+/// `today` を引数で受け取ることでテスト可能
+pub fn resolve_event_range(
+    date: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    days: Option<u64>,
+    today: NaiveDate,
+) -> Result<DateRange, GcalError> {
+    // --date が指定されていればそれを使う
+    if let Some(expr) = date {
+        return parse_date_expr(expr, today);
+    }
+
+    // --from / --to の組み合わせ
+    if from.is_some() || to.is_some() {
+        let from_date = match from {
+            Some(expr) => parse_date_expr(expr, today)?.from,
+            None => today,
+        };
+        let to_date = match to {
+            Some(expr) => parse_date_expr(expr, today)?.from, // 単日指定は .from を使う
+            None => from_date + Duration::days(6),            // --from のみ: 7日間
+        };
+
+        if from_date > to_date {
+            return Err(GcalError::ConfigError(format!(
+                "--from ({from_date}) が --to ({to_date}) より後になっています"
+            )));
+        }
+
+        return Ok(DateRange { from: from_date, to: to_date });
+    }
+
+    // デフォルト: 今日から N 日間
+    let n = days.unwrap_or(7);
+    Ok(DateRange {
+        from: today,
+        to: today + Duration::days(n as i64 - 1),
+    })
+}
+
+// ============================================================
 // テスト
 // ============================================================
 
@@ -391,5 +443,71 @@ mod tests {
     fn test_invalid_date_returns_error() {
         let result = parse_date_expr("13/40", today());
         assert!(result.is_err());
+    }
+
+    // --- resolve_event_range のテスト ---
+
+    #[test]
+    fn test_resolve_date_option() {
+        // --date 来週 → 来週月〜日
+        let r = resolve_event_range(Some("来週"), None, None, None, today()).unwrap();
+        assert_eq!(r, range(date(2026, 3, 2), date(2026, 3, 8)));
+    }
+
+    #[test]
+    fn test_resolve_from_and_to() {
+        // --from 3/1 --to 3/15
+        let r = resolve_event_range(None, Some("3/1"), Some("3/15"), None, today()).unwrap();
+        assert_eq!(r, range(date(2026, 3, 1), date(2026, 3, 15)));
+    }
+
+    #[test]
+    fn test_resolve_from_only_defaults_7_days() {
+        // --from 3/1 のみ → 3/1〜3/7
+        let r = resolve_event_range(None, Some("3/1"), None, None, today()).unwrap();
+        assert_eq!(r, range(date(2026, 3, 1), date(2026, 3, 7)));
+    }
+
+    #[test]
+    fn test_resolve_to_only_defaults_from_today() {
+        // --to 3/5 のみ → 今日〜3/5
+        let r = resolve_event_range(None, None, Some("3/5"), None, today()).unwrap();
+        assert_eq!(r, range(date(2026, 2, 24), date(2026, 3, 5)));
+    }
+
+    #[test]
+    fn test_resolve_days_option() {
+        // --days 3 → 今日〜今日+2
+        let r = resolve_event_range(None, None, None, Some(3), today()).unwrap();
+        assert_eq!(r, range(date(2026, 2, 24), date(2026, 2, 26)));
+    }
+
+    #[test]
+    fn test_resolve_default_7_days() {
+        // 何も指定しない → 今日〜今日+6
+        let r = resolve_event_range(None, None, None, None, today()).unwrap();
+        assert_eq!(r, range(date(2026, 2, 24), date(2026, 3, 2)));
+    }
+
+    #[test]
+    fn test_resolve_from_after_to_returns_error() {
+        // --from が --to より後 → エラー
+        let result = resolve_event_range(None, Some("3/15"), Some("3/1"), None, today());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_from_equals_to() {
+        // --from と --to が同じ日 → 1日分
+        let r = resolve_event_range(None, Some("3/5"), Some("3/5"), None, today()).unwrap();
+        assert_eq!(r, DateRange::single(date(2026, 3, 5)));
+    }
+
+    #[test]
+    fn test_resolve_from_with_natural_language() {
+        // --from 明日 --to 来週 は "来週" の from を使う
+        let r = resolve_event_range(None, Some("明日"), Some("来週"), None, today()).unwrap();
+        // 明日=2/25、来週 の from=3/2
+        assert_eq!(r, range(date(2026, 2, 25), date(2026, 3, 2)));
     }
 }
