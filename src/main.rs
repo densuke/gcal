@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
+use chrono::Local;
 use clap::Parser;
 
 use gcal::app::App;
@@ -7,8 +7,8 @@ use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
 use gcal::config::{Config, FileTokenStore};
-use gcal::date_parser::{parse_datetime_expr, parse_datetime_range_expr, parse_end_expr, resolve_event_range};
-use gcal::domain::{NewEvent, UpdateEvent};
+use gcal::cli_mapper::CliMapper;
+
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -49,102 +49,19 @@ async fn run() -> Result<(), GcalError> {
 
         Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
             let today = Local::now().date_naive();
-            let (start_dt, end_dt) = if let Some(d) = date {
-                parse_datetime_range_expr(&d, today)?
-            } else {
-                let s = start.ok_or_else(|| {
-                    GcalError::ConfigError(
-                        "--date か --start のいずれかを指定してください".to_string(),
-                    )
-                })?;
-                let start_dt = parse_datetime_expr(&s, today)?;
-                let end_dt = match end {
-                    Some(e) => parse_end_expr(&e, start_dt, today)?,
-                    None => start_dt + Duration::hours(1),
-                };
-                (start_dt, end_dt)
-            };
-
-            let recurrence_payload = gcal::date_parser::parse_recurrence(
-                repeat.as_deref(),
-                every,
-                on.as_deref(),
-                until.as_deref(),
-                count,
-                recur,
+            let event = CliMapper::map_add_command(
+                title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, today
             )?;
-            let reminders_payload = gcal::date_parser::parse_reminders(
-                reminder,
-                reminders.as_deref(),
-            )?;
-
-            let event = NewEvent {
-                summary: title,
-                calendar_id: calendar,
-                start: start_dt,
-                end: end_dt,
-                recurrence: recurrence_payload,
-                reminders: reminders_payload,
-            };
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
         }
 
         Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, .. } => {
-            // --title / --start・--end / --date のいずれも指定されていない、かつ更新フラグもない場合はエラー
-            if title.is_none() && start.is_none() && date.is_none() && repeat.is_none() && recur.is_none() && reminder.is_none() && reminders.is_none() && !clear_repeat && !clear_reminders && !clear_location {
-                return Err(GcalError::ConfigError(
-                    "更新する項目 (--title / --start / --date / --repeat / --reminder など) を指定してください".to_string(),
-                ));
-            }
             let today = Local::now().date_naive();
-            let (start_dt, end_dt) = if let Some(d) = date {
-                let (s, e) = parse_datetime_range_expr(&d, today)?;
-                (Some(s), Some(e))
-            } else {
-                match (start, end) {
-                    (Some(s), Some(e)) => {
-                        let start_dt = parse_datetime_expr(&s, today)?;
-                        let end_dt = parse_end_expr(&e, start_dt, today)?;
-                        (Some(start_dt), Some(end_dt))
-                    }
-                    _ => (None, None),
-                }
-            };
-
-            let mut recurrence_payload = gcal::date_parser::parse_recurrence(
-                repeat.as_deref(),
-                every,
-                on.as_deref(),
-                until.as_deref(),
-                count,
-                recur,
+            let event = CliMapper::map_update_command(
+                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, today
             )?;
-            if clear_repeat {
-                recurrence_payload = Some(vec![]);
-            }
-
-            let mut reminders_payload = gcal::date_parser::parse_reminders(
-                reminder,
-                reminders.as_deref(),
-            )?;
-            if clear_reminders {
-                reminders_payload = Some(gcal::gcal_api::models::EventReminders {
-                    use_default: false,
-                    overrides: Some(vec![]),
-                });
-            }
-
-            let event = UpdateEvent {
-                event_id,
-                calendar_id: calendar,
-                title,
-                start: start_dt,
-                end: end_dt,
-                recurrence: recurrence_payload,
-                reminders: reminders_payload,
-            };
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_update_event(event, &mut out).await?;
@@ -168,16 +85,9 @@ async fn run() -> Result<(), GcalError> {
 
         Commands::Events { calendar, days, date, from, to, ids } => {
             let today = Local::now().date_naive();
-            let range = resolve_event_range(
-                date.as_deref(),
-                from.as_deref(),
-                to.as_deref(),
-                days,
-                today,
+            let (time_min, time_max) = CliMapper::map_events_command(
+                date, from, to, days.map(|x| x as u64), today
             )?;
-
-            let time_min = naive_date_to_utc_start(range.from)?;
-            let time_max = naive_date_to_utc_end(range.to)?;
 
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
@@ -186,24 +96,6 @@ async fn run() -> Result<(), GcalError> {
     }
 
     Ok(())
-}
-
-/// NaiveDate の 0:00:00 をローカルタイムとして UTC に変換
-fn naive_date_to_utc_start(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
-    Local
-        .from_local_datetime(&date.and_hms_opt(0, 0, 0).expect("0:00:00 は常に有効"))
-        .single()
-        .map(|dt| dt.with_timezone(&Utc))
-        .ok_or_else(|| GcalError::ConfigError("ローカル時刻の変換に失敗しました".to_string()))
-}
-
-/// NaiveDate の 23:59:59 をローカルタイムとして UTC に変換
-fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError> {
-    Local
-        .from_local_datetime(&date.and_hms_opt(23, 59, 59).expect("23:59:59 は常に有効"))
-        .single()
-        .map(|dt| dt.with_timezone(&Utc))
-        .ok_or_else(|| GcalError::ConfigError("ローカル時刻の変換に失敗しました".to_string()))
 }
 
 /// API クライアントと App を組み立てる

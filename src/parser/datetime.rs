@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Weekday};
-
 use crate::error::GcalError;
+use crate::parser::duration::parse_duration_str;
+use crate::parser::util::{normalize, take_number, strip_suffix_u64};
 
 /// 日付範囲（from 以上 to 以下、両端含む）
 #[derive(Debug, Clone, PartialEq)]
@@ -171,45 +172,11 @@ fn parse_month_day(s: &str, year: i32) -> Option<NaiveDate> {
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
-/// 先頭の数字列を取り出し (残り文字列, 数値) を返す
-fn take_number(s: &str) -> Option<(&str, u32)> {
-    let end = s.find(|c: char| !c.is_ascii_digit())?;
-    if end == 0 {
-        return None;
-    }
-    let n = s[..end].parse::<u32>().ok()?;
-    Some((&s[end..], n))
-}
-
-/// "N<suffix>" の形式から N を取り出す（例: "3日後" → Some(3)）
-fn strip_suffix_u64(s: &str, suffix: &str) -> Option<u64> {
-    s.strip_suffix(suffix)?.parse::<u64>().ok()
-}
-
-/// 入力を正規化する（全角数字→半角、全角スラッシュ→半角、trim）
-fn normalize(s: &str) -> String {
-    s.trim()
-        .chars()
-        .map(|c| match c {
-            '０'..='９' => char::from_u32(c as u32 - '０' as u32 + '0' as u32).unwrap(),
-            '／' => '/',
-            _ => c,
-        })
-        .collect()
-}
-
 // ============================================================
 // --from / --to / --date / --days の組み合わせ解決
 // ============================================================
 
 /// CLI 引数の組み合わせから DateRange を解決する
-///
-/// 優先順位:
-///   1. `--date` → parse_date_expr で解決
-///   2. `--from` / `--to`（片方のみでも可）
-///   3. `--days`（デフォルト 7）
-///
-/// `today` を引数で受け取ることでテスト可能
 pub fn resolve_event_range(
     date: Option<&str>,
     from: Option<&str>,
@@ -256,13 +223,10 @@ pub fn resolve_event_range(
 
 /// "今日 14:00" や "3/19 10:00" など、"<日付表現> HH:MM" 形式の入力を
 /// DateTime<Local> に変換する
-///
-/// `today` を引数で受け取ることでテストが固定時刻で動く
 pub fn parse_datetime_expr(input: &str, today: NaiveDate) -> Result<DateTime<Local>, GcalError> {
     let s = input.trim();
 
     // 末尾の "HH:MM" を分離する
-    // 末尾が "HH:MM" または "H:MM" パターンと仮定し、最後のスペースで分割
     let (date_part, time_part) = s.rsplit_once(' ').ok_or_else(|| {
         GcalError::ConfigError(format!(
             "日時の形式が不正です: '{input}'\n\
@@ -291,53 +255,7 @@ pub fn parse_datetime_expr(input: &str, today: NaiveDate) -> Result<DateTime<Loc
         })
 }
 
-// ============================================================
-// 相対時間・終了時刻・日時範囲 パース
-// ============================================================
-
-/// "+1h", "+30m", "+1h30m", "+90m" などの相対時間を Duration に変換する
-///
-/// `+` プレフィックスが必須。なければエラー。
-pub fn parse_duration_str(s: &str) -> Result<Duration, GcalError> {
-    let rest = s.strip_prefix('+').ok_or_else(|| {
-        GcalError::ConfigError(format!(
-            "相対時間には '+' が必要です: '{s}'\n例: \"+1h\", \"+30m\", \"+1h30m\""
-        ))
-    })?;
-    if rest.is_empty() {
-        return Err(GcalError::ConfigError(format!("相対時間の値がありません: '{s}'")));
-    }
-
-    let mut hours: i64 = 0;
-    let mut minutes: i64 = 0;
-    let mut remaining = rest;
-
-    if let Some(h_pos) = remaining.find('h') {
-        let h_str = &remaining[..h_pos];
-        hours = h_str.parse::<i64>().map_err(|_| {
-            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
-        })?;
-        remaining = &remaining[h_pos + 1..];
-    }
-
-    if !remaining.is_empty() {
-        let m_str = remaining.strip_suffix('m').ok_or_else(|| {
-            GcalError::ConfigError(format!(
-                "相対時間の形式が不正です: '{s}'\n例: \"+1h\", \"+30m\", \"+1h30m\""
-            ))
-        })?;
-        minutes = m_str.parse::<i64>().map_err(|_| {
-            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
-        })?;
-    }
-
-    Ok(Duration::hours(hours) + Duration::minutes(minutes))
-}
-
 /// 終了日時を解析する
-///
-/// - `+` で始まる場合: `parse_duration_str` で解析し `start + duration` を返す
-/// - それ以外: `parse_datetime_expr` に委譲
 pub fn parse_end_expr(
     input: &str,
     start: DateTime<Local>,
@@ -352,8 +270,6 @@ pub fn parse_end_expr(
 }
 
 /// 内部ヘルパー: "HH:MM[-HH:MM]" または "H:MM[+duration]" を (time_str, end_spec) に分割
-///
-/// コロン位置 + 3 が時刻文字列の終端 (コロン + 2桁の分まで)
 fn split_time_and_end_spec(s: &str) -> Option<(&str, Option<&str>)> {
     let colon_pos = s.find(':')?;
     let end_of_time = colon_pos + 3;
@@ -372,12 +288,6 @@ fn split_time_and_end_spec(s: &str) -> Option<(&str, Option<&str>)> {
 }
 
 /// "今日 12:00-13:00" や "明日 10:00+1h" など、日時範囲を1フラグで指定する形式を解析する
-///
-/// 対応形式:
-/// - `"今日 12:00"` → 開始 12:00、終了 13:00 (デフォルト +1h)
-/// - `"今日 12:00-13:30"` → 開始 12:00、終了 13:30
-/// - `"今日 12:00+1h"` → 開始 12:00、終了 13:00
-/// - `"明日 10:00+30m"` → 開始 10:00、終了 10:30
 pub fn parse_datetime_range_expr(
     input: &str,
     today: NaiveDate,
@@ -417,7 +327,6 @@ pub fn parse_datetime_range_expr(
             start_dt + dur
         }
         Some(spec) => {
-            // starts_with('-') が保証される
             let end_time_str = &spec[1..];
             let end_time = NaiveTime::parse_from_str(end_time_str, "%H:%M").map_err(|_| {
                 GcalError::ConfigError(format!("終了時刻の形式が不正です: '{end_time_str}'"))
@@ -434,128 +343,10 @@ pub fn parse_datetime_range_expr(
     Ok((start_dt, end_dt))
 }
 
-// ============================================================
-// Recurrence & Reminders Parsing 
-// ============================================================
-
-pub fn parse_recurrence(
-    repeat: Option<&str>,
-    every: Option<u32>,
-    on: Option<&str>,
-    until: Option<&str>,
-    count: Option<u32>,
-    recur: Option<Vec<String>>,
-) -> Result<Option<Vec<String>>, GcalError> {
-    if let Some(rlist) = recur {
-        return Ok(Some(rlist));
-    }
-    
-    let freq = match repeat {
-        Some("daily") => "DAILY",
-        Some("weekly") => "WEEKLY",
-        Some("monthly") => "MONTHLY",
-        Some("yearly") => "YEARLY",
-        Some(other) => return Err(GcalError::ConfigError(format!("未検証のrepeat値: {}", other))),
-        None => return Ok(None),
-    };
-
-    let mut parts = vec![format!("FREQ={}", freq)];
-
-    if let Some(interval) = every {
-        parts.push(format!("INTERVAL={}", interval));
-    }
-
-    if let Some(days) = on {
-        // e.g., "mon,wed" -> "MO,WE"
-        let mapped: Vec<String> = days.split(',').map(|d| {
-            match d.trim().to_lowercase().as_str() {
-                "mon" | "monday" | "月" => "MO".to_string(),
-                "tue" | "tuesday" | "火" => "TU".to_string(),
-                "wed" | "wednesday" | "水" => "WE".to_string(),
-                "thu" | "thursday" | "木" => "TH".to_string(),
-                "fri" | "friday" | "金" => "FR".to_string(),
-                "sat" | "saturday" | "土" => "SA".to_string(),
-                "sun" | "sunday" | "日" => "SU".to_string(),
-                other => other.to_uppercase(),
-            }
-        }).collect();
-        parts.push(format!("BYDAY={}", mapped.join(",")));
-    }
-
-    if let Some(u) = until {
-        let today = chrono::Local::now().date_naive();
-        let range = parse_date_expr(u, today)?;
-        let date_str = range.from.format("%Y%m%d").to_string();
-        // Append T235959Z for accurate until handling 
-        parts.push(format!("UNTIL={}T235959Z", date_str));
-    } else if let Some(c) = count {
-        parts.push(format!("COUNT={}", c));
-    }
-
-    let rrule = format!("RRULE:{}", parts.join(";"));
-    Ok(Some(vec![rrule]))
-}
-
-pub fn parse_reminders(
-    reminder: Option<Vec<String>>,
-    reminders: Option<&str>,
-) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
-    if let Some(preset) = reminders {
-        if preset == "default" {
-            return Ok(Some(crate::gcal_api::models::EventReminders {
-                use_default: true,
-                overrides: None,
-            }));
-        } else if preset == "none" {
-            return Ok(Some(crate::gcal_api::models::EventReminders {
-                use_default: false,
-                overrides: Some(vec![]),
-            }));
-        } else {
-            return Err(GcalError::ConfigError(format!("不明なremindersプリセット: {}", preset)));
-        }
-    }
-
-    if let Some(list) = reminder {
-        let mut overrides = Vec::new();
-        for item in list {
-            let parts: Vec<&str> = item.split(':').collect();
-            if parts.len() != 2 {
-                return Err(GcalError::ConfigError(format!("無効なreminder指定: {}", item)));
-            }
-            let method = parts[0].to_string();
-            let time_str = parts[1];
-            
-            let minutes = if let Some(m) = strip_suffix_u64(time_str, "m") {
-                m as i32
-            } else if let Some(h) = strip_suffix_u64(time_str, "h") {
-                (h * 60) as i32
-            } else if let Some(d) = strip_suffix_u64(time_str, "d") {
-                (d * 24 * 60) as i32
-            } else {
-                return Err(GcalError::ConfigError(format!("無効な時間指定: {}", time_str)));
-            };
-
-            overrides.push(crate::gcal_api::models::EventReminderOverride { method, minutes });
-        }
-        return Ok(Some(crate::gcal_api::models::EventReminders {
-            use_default: false,
-            overrides: Some(overrides),
-        }));
-    }
-
-    Ok(None)
-}
-
-// ============================================================
-// テスト
-// ============================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// テスト基準日: 2026-02-24 (火曜日)
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
     }
@@ -566,6 +357,18 @@ mod tests {
 
     fn range(from: NaiveDate, to: NaiveDate) -> DateRange {
         DateRange { from, to }
+    }
+
+    fn local_dt(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Local> {
+        Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(h, min, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap()
     }
 
     // --- キーワード ---
@@ -606,13 +409,8 @@ mod tests {
     }
 
     // --- 今週・来週 ---
-    // 基準日: 2026-02-24 (火曜)
-    // 今週日曜: 2026-03-01
-    // 来週月曜: 2026-03-02、来週日曜: 2026-03-08
-
     #[test]
     fn test_this_week_from_tuesday() {
-        // 火曜〜日曜
         assert_eq!(
             parse_date_expr("今週", today()).unwrap(),
             range(date(2026, 2, 24), date(2026, 3, 1))
@@ -621,7 +419,6 @@ mod tests {
 
     #[test]
     fn test_this_week_from_sunday() {
-        // 日曜の場合は当日のみ
         let sunday = date(2026, 3, 1);
         assert_eq!(
             parse_date_expr("今週", sunday).unwrap(),
@@ -638,7 +435,6 @@ mod tests {
     }
 
     // --- 今月・来月 ---
-
     #[test]
     fn test_this_month() {
         assert_eq!(
@@ -657,7 +453,6 @@ mod tests {
 
     #[test]
     fn test_next_month_december() {
-        // 12月の翌月は来年1月
         let dec = date(2026, 12, 15);
         assert_eq!(
             parse_date_expr("来月", dec).unwrap(),
@@ -666,7 +461,6 @@ mod tests {
     }
 
     // --- N日後 / N週間後 ---
-
     #[test]
     fn test_n_days_later() {
         assert_eq!(parse_date_expr("3日後", today()).unwrap(), DateRange::single(date(2026, 2, 27)));
@@ -688,7 +482,6 @@ mod tests {
     }
 
     // --- M/D 形式 ---
-
     #[test]
     fn test_month_day_slash() {
         assert_eq!(parse_date_expr("3/19", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
@@ -700,7 +493,6 @@ mod tests {
     }
 
     // --- YYYY/M/D 形式 ---
-
     #[test]
     fn test_full_date_slash() {
         assert_eq!(parse_date_expr("2027/1/5", today()).unwrap(), DateRange::single(date(2027, 1, 5)));
@@ -712,7 +504,6 @@ mod tests {
     }
 
     // --- 全角入力の正規化 ---
-
     #[test]
     fn test_fullwidth_month_day() {
         assert_eq!(parse_date_expr("３月１９日", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
@@ -729,7 +520,6 @@ mod tests {
     }
 
     // --- エラーケース ---
-
     #[test]
     fn test_unknown_expression_returns_error() {
         let result = parse_date_expr("来年", today());
@@ -743,73 +533,61 @@ mod tests {
     }
 
     // --- resolve_event_range のテスト ---
-
     #[test]
     fn test_resolve_date_option() {
-        // --date 来週 → 来週月〜日
         let r = resolve_event_range(Some("来週"), None, None, None, today()).unwrap();
         assert_eq!(r, range(date(2026, 3, 2), date(2026, 3, 8)));
     }
 
     #[test]
     fn test_resolve_from_and_to() {
-        // --from 3/1 --to 3/15
         let r = resolve_event_range(None, Some("3/1"), Some("3/15"), None, today()).unwrap();
         assert_eq!(r, range(date(2026, 3, 1), date(2026, 3, 15)));
     }
 
     #[test]
     fn test_resolve_from_only_defaults_7_days() {
-        // --from 3/1 のみ → 3/1〜3/7
         let r = resolve_event_range(None, Some("3/1"), None, None, today()).unwrap();
         assert_eq!(r, range(date(2026, 3, 1), date(2026, 3, 7)));
     }
 
     #[test]
     fn test_resolve_to_only_defaults_from_today() {
-        // --to 3/5 のみ → 今日〜3/5
         let r = resolve_event_range(None, None, Some("3/5"), None, today()).unwrap();
         assert_eq!(r, range(date(2026, 2, 24), date(2026, 3, 5)));
     }
 
     #[test]
     fn test_resolve_days_option() {
-        // --days 3 → 今日〜今日+2
         let r = resolve_event_range(None, None, None, Some(3), today()).unwrap();
         assert_eq!(r, range(date(2026, 2, 24), date(2026, 2, 26)));
     }
 
     #[test]
     fn test_resolve_default_7_days() {
-        // 何も指定しない → 今日〜今日+6
         let r = resolve_event_range(None, None, None, None, today()).unwrap();
         assert_eq!(r, range(date(2026, 2, 24), date(2026, 3, 2)));
     }
 
     #[test]
     fn test_resolve_from_after_to_returns_error() {
-        // --from が --to より後 → エラー
         let result = resolve_event_range(None, Some("3/15"), Some("3/1"), None, today());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_resolve_from_equals_to() {
-        // --from と --to が同じ日 → 1日分
         let r = resolve_event_range(None, Some("3/5"), Some("3/5"), None, today()).unwrap();
         assert_eq!(r, DateRange::single(date(2026, 3, 5)));
     }
 
     #[test]
     fn test_resolve_from_with_natural_language() {
-        // --from 明日 --to 来週 は "来週" の from を使う
         let r = resolve_event_range(None, Some("明日"), Some("来週"), None, today()).unwrap();
-        // 明日=2/25、来週 の from=3/2
         assert_eq!(r, range(date(2026, 2, 25), date(2026, 3, 2)));
     }
 
     // --- parse_datetime_expr のテスト ---
-
     #[test]
     fn test_datetime_today() {
         let dt = parse_datetime_expr("今日 14:00", today()).unwrap();
@@ -847,74 +625,23 @@ mod tests {
 
     #[test]
     fn test_datetime_no_time_returns_error() {
-        // 時刻なし → エラー
         let result = parse_datetime_expr("今日", today());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_datetime_invalid_time_returns_error() {
-        // 不正な時刻 → エラー
         let result = parse_datetime_expr("今日 25:00", today());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_datetime_invalid_date_returns_error() {
-        // 不正な日付 → エラー
         let result = parse_datetime_expr("来年 10:00", today());
         assert!(result.is_err());
     }
 
-    // --- parse_duration_str のテスト ---
-
-    #[test]
-    fn test_duration_1h() {
-        assert_eq!(parse_duration_str("+1h").unwrap(), Duration::hours(1));
-    }
-
-    #[test]
-    fn test_duration_30m() {
-        assert_eq!(parse_duration_str("+30m").unwrap(), Duration::minutes(30));
-    }
-
-    #[test]
-    fn test_duration_1h30m() {
-        assert_eq!(
-            parse_duration_str("+1h30m").unwrap(),
-            Duration::hours(1) + Duration::minutes(30)
-        );
-    }
-
-    #[test]
-    fn test_duration_90m() {
-        assert_eq!(parse_duration_str("+90m").unwrap(), Duration::minutes(90));
-    }
-
-    #[test]
-    fn test_duration_no_plus_returns_error() {
-        assert!(parse_duration_str("1h").is_err());
-    }
-
-    #[test]
-    fn test_duration_invalid_returns_error() {
-        assert!(parse_duration_str("+abc").is_err());
-    }
-
     // --- parse_end_expr のテスト ---
-
-    fn local_dt(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Local> {
-        Local
-            .from_local_datetime(
-                &NaiveDate::from_ymd_opt(y, m, d)
-                    .unwrap()
-                    .and_hms_opt(h, min, 0)
-                    .unwrap(),
-            )
-            .single()
-            .unwrap()
-    }
-
     #[test]
     fn test_end_expr_relative_1h() {
         let start = local_dt(2026, 2, 24, 13, 0);
@@ -990,59 +717,5 @@ mod tests {
     #[test]
     fn test_range_no_space_returns_error() {
         assert!(parse_datetime_range_expr("9:30", today()).is_err());
-    }
-
-    // --- TDD: parse_recurrence tests (Failing) ---
-    #[test]
-    fn test_parse_recurrence_daily() {
-        let rrule = super::parse_recurrence(Some("daily"), None, None, None, None, None).unwrap().unwrap();
-        assert_eq!(rrule, vec!["RRULE:FREQ=DAILY"]);
-    }
-
-    #[test]
-    fn test_parse_recurrence_weekly_with_interval_and_count() {
-        let rrule = super::parse_recurrence(Some("weekly"), Some(2), Some("mon,wed"), None, Some(10), None).unwrap().unwrap();
-        assert_eq!(rrule, vec!["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=10"]);
-    }
-
-    #[test]
-    fn test_parse_recurrence_monthly_with_until() {
-        let rrule = super::parse_recurrence(Some("monthly"), None, None, Some("2026/12/31"), None, None).unwrap().unwrap();
-        assert_eq!(rrule, vec!["RRULE:FREQ=MONTHLY;UNTIL=20261231T235959Z"]);
-    }
-
-    #[test]
-    fn test_parse_recurrence_raw_rrule() {
-        let raw = vec!["RRULE:FREQ=YEARLY".to_string()];
-        let rrule = super::parse_recurrence(None, None, None, None, None, Some(raw)).unwrap().unwrap();
-        assert_eq!(rrule, vec!["RRULE:FREQ=YEARLY"]);
-    }
-
-    // --- TDD: parse_reminders tests (Failing) ---
-    #[test]
-    fn test_parse_reminders_default() {
-        let rems = super::parse_reminders(None, Some("default")).unwrap().unwrap();
-        assert!(rems.use_default);
-        assert!(rems.overrides.is_none());
-    }
-
-    #[test]
-    fn test_parse_reminders_none() {
-        let rems = super::parse_reminders(None, Some("none")).unwrap().unwrap();
-        assert!(!rems.use_default);
-        assert_eq!(rems.overrides.unwrap().len(), 0);
-    }
-
-    #[test]
-    fn test_parse_reminders_custom() {
-        let overrides = vec!["popup:10m".to_string(), "email:1d".to_string()];
-        let rems = super::parse_reminders(Some(overrides), None).unwrap().unwrap();
-        assert!(!rems.use_default);
-        let o = rems.overrides.unwrap();
-        assert_eq!(o.len(), 2);
-        assert_eq!(o[0].method, "popup");
-        assert_eq!(o[0].minutes, 10);
-        assert_eq!(o[1].method, "email");
-        assert_eq!(o[1].minutes, 1440);
     }
 }

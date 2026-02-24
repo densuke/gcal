@@ -124,9 +124,7 @@ impl<S: TokenStore, C: Clock> TokenProvider for RefreshingTokenProvider<S, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use chrono::{DateTime, Duration, TimeZone, Utc};
-    use std::cell::RefCell;
     use std::sync::{Arc, Mutex};
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

@@ -1,3 +1,39 @@
+   Compiling futures-channel v0.3.32
+   Compiling futures-macro v0.3.32
+   Compiling aho-corasick v1.1.4
+   Compiling regex-syntax v0.8.9
+   Compiling predicates-core v1.0.10
+   Compiling float-cmp v0.10.0
+   Compiling num_cpus v1.17.0
+   Compiling deadpool-runtime v0.1.4
+   Compiling lazy_static v1.5.0
+   Compiling normalize-line-endings v0.3.0
+   Compiling termtree v0.5.1
+   Compiling difflib v0.4.0
+   Compiling assert_cmd v2.1.2
+   Compiling deadpool v0.12.3
+   Compiling hyper v1.8.1
+   Compiling assert-json-diff v2.0.2
+   Compiling wait-timeout v0.2.1
+   Compiling regex-automata v0.4.14
+   Compiling predicates-tree v1.0.13
+   Compiling regex v1.12.3
+   Compiling bstr v1.12.1
+   Compiling futures-util v0.3.32
+   Compiling predicates v3.1.4
+   Compiling h2 v0.3.27
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling futures-executor v0.3.32
+   Compiling futures v0.3.32
+   Compiling tower-http v0.6.8
+   Compiling hyper-tls v0.6.0
+   Compiling wiremock v0.6.5
+   Compiling reqwest v0.12.28
+   Compiling hyper v0.14.32
+   Compiling hyper-rustls v0.24.2
+   Compiling reqwest v0.11.27
+   Compiling oauth2 v4.4.2
    Compiling gcal v0.3.2 (/Users/densuke/Documents/2026/02/24/gcal)
 warning: unused import: `async_trait::async_trait`
    --> src/auth/provider.rs:127:9
@@ -13,94 +49,85 @@ warning: unused import: `std::cell::RefCell`
 129 |     use std::cell::RefCell;
     |         ^^^^^^^^^^^^^^^^^^
 
-warning: unused import: `Datelike`
-   --> src/cli_mapper.rs:181:29
-    |
-181 |     use chrono::{NaiveDate, Datelike};
-    |                             ^^^^^^^^
-
-warning: `gcal` (lib test) generated 3 warnings (run `cargo fix --lib -p gcal --tests` to apply 3 suggestions)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.04s
+warning: `gcal` (lib test) generated 2 warnings (run `cargo fix --lib -p gcal --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.36s
      Running unittests src/lib.rs (target/debug/deps/gcal-5d4e3504587ef579)
 
-running 123 tests
+running 120 tests
 test auth::callback::tests::test_manual_receiver_redirect_uri ... ok
 test auth::callback::tests::test_loopback_receiver_binds_port ... ok
+test auth::callback::tests::test_manual_receiver_from_full_url ... ok
+test auth::callback::tests::test_manual_receiver_from_query_only ... ok
 test app::tests::test_handle_calendars_prints_names ... ok
+test app::tests::test_handle_update_event_prints_confirmation ... ok
+test auth::callback::tests::test_parse_callback_from_request_line_oauth_error ... ok
 test app::tests::test_handle_calendars_empty ... ok
 test app::tests::test_handle_delete_event_prints_confirmation ... ok
-test app::tests::test_handle_update_event_prints_confirmation ... ok
-test auth::callback::tests::test_manual_receiver_from_query_only ... ok
-test auth::callback::tests::test_manual_receiver_from_full_url ... ok
-test auth::callback::tests::test_parse_callback_from_request_line_oauth_error ... ok
-test auth::callback::tests::test_parse_callback_from_request_line_missing_code ... ok
 test auth::callback::tests::test_parse_callback_from_request_line_ok ... ok
+test auth::callback::tests::test_parse_callback_from_request_line_missing_code ... ok
 test auth::callback::tests::test_url_decode_percent_encoding ... ok
 test app::tests::test_handle_add_event_prints_confirmation ... ok
 test app::tests::test_handle_events_prints_summaries ... ok
-test cli_mapper::tests::test_map_events_command ... ok
-test cli_mapper::tests::test_map_add_command_all_args ... ok
-test cli::tests::test_cli_add_reminder_args ... ok
+test config::tests::test_file_token_store_load_returns_none_when_missing ... ok
+test cli::tests::test_cli_update_clear_flags ... ok
 test cli::tests::test_cli_add_reminders_preset ... ok
 test cli::tests::test_cli_add_repeat_args ... ok
-test cli::tests::test_cli_update_clear_flags ... ok
-test cli_mapper::tests::test_map_update_command_clear_flags ... ok
+test cli::tests::test_cli_add_reminder_args ... ok
 test config::tests::test_load_returns_not_initialized_when_missing ... ok
-test config::tests::test_file_token_store_load_returns_none_when_missing ... ok
-test config::tests::test_save_creates_parent_directory ... ok
 test config::tests::test_file_token_store_save_and_load ... ok
-test config::tests::test_save_and_load_roundtrip ... ok
 test config::tests::test_file_token_store_preserves_credentials_on_save ... ok
+test config::tests::test_save_and_load_roundtrip ... ok
+test config::tests::test_save_creates_parent_directory ... ok
 test auth::provider::tests::test_returns_error_when_not_initialized ... ok
 test auth::provider::tests::test_returns_valid_token_without_refresh ... ok
 test gcal_api::client::tests::test_delete_event_success ... ok
-test gcal_api::client::tests::test_list_calendars_api_error ... ok
 test auth::provider::tests::test_refresh_preserves_old_refresh_token_when_not_returned ... ok
-test gcal_api::client::tests::test_list_calendars_empty_items ... ok
 test auth::provider::tests::test_refreshes_when_token_expired ... ok
+test gcal_api::client::tests::test_list_calendars_api_error ... ok
 test gcal_api::client::tests::test_delete_event_api_error ... ok
 test gcal_api::client::tests::test_create_event_returns_id ... ok
-test gcal_api::client::tests::test_create_event_api_error_401 ... ok
 test gcal_api::client::tests::test_create_event_api_error_400 ... ok
-test gcal_api::client::tests::test_list_calendars_returns_items ... ok
+test gcal_api::client::tests::test_create_event_api_error_401 ... ok
 test output::tests::test_format_date_weekday ... ok
+test gcal_api::client::tests::test_list_calendars_returns_items ... ok
+test gcal_api::client::tests::test_list_calendars_empty_items ... ok
 test output::tests::test_write_calendars_empty ... ok
 test output::tests::test_write_calendars_primary_has_marker ... ok
 test output::tests::test_write_calendars_shows_id_and_name ... ok
 test output::tests::test_write_events_allday ... ok
+test gcal_api::client::tests::test_list_events_parses_allday_event ... ok
+test gcal_api::client::tests::test_list_events_sends_correct_params ... ok
+test gcal_api::client::tests::test_list_events_skips_events_without_start ... ok
+test gcal_api::client::tests::test_list_events_parses_datetime_event ... ok
 test output::tests::test_write_events_empty ... ok
 test output::tests::test_write_events_date_grouping ... ok
+test gcal_api::client::tests::test_update_event_api_error ... ok
 test output::tests::test_write_events_no_ids_by_default ... ok
-test output::tests::test_write_events_show_ids ... ok
-test output::tests::test_write_events_shows_summary ... ok
-test parser::datetime::tests::test_datetime_full_date ... ok
-test gcal_api::client::tests::test_list_events_parses_datetime_event ... ok
-test gcal_api::client::tests::test_list_events_parses_allday_event ... ok
 test parser::datetime::tests::test_datetime_invalid_date_returns_error ... ok
-test gcal_api::client::tests::test_list_events_sends_correct_params ... ok
+test output::tests::test_write_events_show_ids ... ok
 test parser::datetime::tests::test_datetime_invalid_time_returns_error ... ok
-test gcal_api::client::tests::test_list_events_skips_events_without_start ... ok
+test gcal_api::client::tests::test_update_event_title_only ... ok
+test parser::datetime::tests::test_datetime_full_date ... ok
+test output::tests::test_write_events_shows_summary ... ok
 test parser::datetime::tests::test_datetime_japanese_month_day ... ok
 test parser::datetime::tests::test_datetime_no_time_returns_error ... ok
+test parser::datetime::tests::test_day_after_tomorrow ... ok
 test parser::datetime::tests::test_datetime_month_day_slash ... ok
 test parser::datetime::tests::test_datetime_today ... ok
-test parser::datetime::tests::test_day_after_tomorrow ... ok
-test gcal_api::client::tests::test_update_event_api_error ... ok
-test parser::datetime::tests::test_datetime_tomorrow ... ok
-test parser::datetime::tests::test_end_expr_absolute ... ok
-test gcal_api::client::tests::test_update_event_title_only ... ok
 test parser::datetime::tests::test_end_expr_absolute_different_day ... ok
+test gcal_api::client::tests::test_update_event_start_and_end ... ok
 test parser::datetime::tests::test_end_expr_absolute_same_day ... ok
-test parser::datetime::tests::test_full_date_japanese ... ok
-test parser::datetime::tests::test_full_date_slash ... ok
-test parser::datetime::tests::test_fullwidth_month_day ... ok
 test parser::datetime::tests::test_end_expr_relative_30m ... ok
+test parser::datetime::tests::test_end_expr_absolute ... ok
+test parser::datetime::tests::test_datetime_tomorrow ... ok
+test parser::datetime::tests::test_full_date_slash ... ok
+test parser::datetime::tests::test_full_date_japanese ... ok
+test parser::datetime::tests::test_fullwidth_month_day ... ok
 test parser::datetime::tests::test_end_expr_relative_1h ... ok
 test parser::datetime::tests::test_fullwidth_slash ... ok
 test parser::datetime::tests::test_invalid_date_returns_error ... ok
 test parser::datetime::tests::test_month_day_japanese ... ok
 test parser::datetime::tests::test_month_day_slash ... ok
-test gcal_api::client::tests::test_update_event_start_and_end ... ok
 test parser::datetime::tests::test_n_days_later ... ok
 test parser::datetime::tests::test_n_days_later_large ... ok
 test parser::datetime::tests::test_n_weeks_later ... ok
@@ -108,19 +135,19 @@ test parser::datetime::tests::test_n_weeks_later_short ... ok
 test parser::datetime::tests::test_next_month ... ok
 test parser::datetime::tests::test_next_month_december ... ok
 test parser::datetime::tests::test_next_week ... ok
-test parser::datetime::tests::test_range_absolute_end ... ok
 test parser::datetime::tests::test_range_no_space_returns_error ... ok
+test parser::datetime::tests::test_range_absolute_end ... ok
 test parser::datetime::tests::test_range_default_1h ... ok
 test parser::datetime::tests::test_resolve_date_option ... ok
 test parser::datetime::tests::test_resolve_days_option ... ok
+test parser::datetime::tests::test_range_relative_end_1h30m ... ok
 test parser::datetime::tests::test_resolve_default_7_days ... ok
 test parser::datetime::tests::test_range_relative_end_30m ... ok
-test parser::datetime::tests::test_range_relative_end_1h30m ... ok
-test parser::datetime::tests::test_resolve_from_and_to ... ok
 test parser::datetime::tests::test_resolve_from_after_to_returns_error ... ok
+test parser::datetime::tests::test_resolve_from_and_to ... ok
 test parser::datetime::tests::test_resolve_from_equals_to ... ok
-test parser::datetime::tests::test_range_relative_end_1h ... ok
 test parser::datetime::tests::test_resolve_from_only_defaults_7_days ... ok
+test parser::datetime::tests::test_range_relative_end_1h ... ok
 test parser::datetime::tests::test_resolve_from_with_natural_language ... ok
 test parser::datetime::tests::test_resolve_to_only_defaults_from_today ... ok
 test parser::datetime::tests::test_this_month ... ok
@@ -148,7 +175,7 @@ test parser::reminders::tests::test_parse_reminders_custom ... ok
 test parser::reminders::tests::test_parse_reminders_default ... ok
 test parser::reminders::tests::test_parse_reminders_none ... ok
 
-test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 120 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running unittests src/main.rs (target/debug/deps/gcal-21e72fcb3c717d98)
 
