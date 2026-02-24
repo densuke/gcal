@@ -113,17 +113,27 @@ impl CliMapper {
         reminders: Option<String>,
         location: Option<String>,
         today: NaiveDate,
+        ai_params: Option<AiEventParameters>,
     ) -> Result<UpdateEvent, GcalError> {
-        if title.is_none() && start.is_none() && date.is_none() && repeat.is_none() && recur.is_none() && reminder.is_none() && reminders.is_none() && location.is_none() && !clear_repeat && !clear_reminders && !clear_location {
+        // CLI か AI のいずれかで何か更新対象が必要
+        let has_cli_update = title.is_some() || start.is_some() || date.is_some()
+            || repeat.is_some() || recur.is_some() || reminder.is_some()
+            || reminders.is_some() || location.is_some()
+            || clear_repeat || clear_reminders || clear_location;
+        if !has_cli_update && ai_params.is_none() {
             return Err(GcalError::ConfigError(
-                "更新する項目 (--title / --start / --date / --location など) を指定してください".to_string(),
+                "更新する項目 (--title / --start / --date / --location / --ai など) を指定してください".to_string(),
             ));
         }
 
+        // title: CLI > AI
+        let effective_title = title.or_else(|| ai_params.as_ref().and_then(|p| p.title.clone()));
+
+        // 時刻解決: CLI --date > CLI --start > AI date+start
         let (start_dt, end_dt) = if let Some(d) = date {
             let (s, e) = parse_datetime_range_expr(&d, today)?;
             (Some(s), Some(e))
-        } else {
+        } else if start.is_some() {
             match (start, end) {
                 (Some(s), Some(e)) => {
                     let start_dt = parse_datetime_expr(&s, today)?;
@@ -132,6 +142,22 @@ impl CliMapper {
                 }
                 _ => (None, None),
             }
+        } else if let Some(ref ai) = ai_params {
+            match (&ai.date, &ai.start) {
+                (Some(d), Some(t)) => {
+                    let combined = format!("{d} {t}");
+                    let start_dt = parse_datetime_expr(&combined, today)?;
+                    let end_str = ai.end.as_deref();
+                    let end_dt = match end_str {
+                        Some(e) => parse_end_expr(&normalize_ai_end(e, &start_dt), start_dt, today)?,
+                        None => start_dt + Duration::hours(1),
+                    };
+                    (Some(start_dt), Some(end_dt))
+                }
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
         };
 
         let mut recurrence_payload = parse_recurrence(
@@ -157,20 +183,22 @@ impl CliMapper {
             });
         }
 
-        let mut location_payload = location;
-        if clear_location {
-            location_payload = Some(String::new());
-        }
+        // location: clear_location > CLI > AI
+        let effective_location = if clear_location {
+            Some(String::new())
+        } else {
+            location.or_else(|| ai_params.as_ref().and_then(|p| p.location.clone()))
+        };
 
         Ok(UpdateEvent {
             event_id,
             calendar_id: calendar,
-            title,
+            title: effective_title,
             start: start_dt,
             end: end_dt,
             recurrence: recurrence_payload,
             reminders: reminders_payload,
-            location: location_payload,
+            location: effective_location,
         })
     }
 
@@ -498,13 +526,16 @@ mod tests {
         assert_eq!(normalize_ai_end("明日 15:00", &start), "明日 15:00");
     }
 
+    // --- map_update_command: リグレッションテスト ---
+
     #[test]
     fn test_map_update_command_clear_flags() {
-        let today = NaiveDate::from_ymd_opt(2026, 2, 24).unwrap();
         let event = CliMapper::map_update_command(
             "event_123".to_string(),
             None, None, None, None, "primary".to_string(),
-            true, true, true, None, None, None, None, None, None, None, None, None, today
+            true, true, true, None, None, None, None, None, None, None, None, None,
+            today(),
+            None,
         ).unwrap();
 
         assert_eq!(event.event_id, "event_123");
@@ -512,6 +543,99 @@ mod tests {
         assert_eq!(event.recurrence, Some(vec![]));
         assert!(!event.reminders.unwrap().use_default);
         assert_eq!(event.location.unwrap(), "");
+    }
+
+    // --- map_update_command: AI マージテスト ---
+
+    #[test]
+    fn test_map_update_ai_provides_title() {
+        // AI がタイトルを提供 → タイトルが更新される
+        let ai = AiEventParameters {
+            title: Some("AI更新タイトル".to_string()),
+            date: None, start: None, end: None, location: None, repeat_rule: None,
+        };
+        let event = CliMapper::map_update_command(
+            "evt_1".to_string(),
+            None, None, None, None, "primary".to_string(),
+            false, false, false, None, None, None, None, None, None, None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        assert_eq!(event.title.as_deref(), Some("AI更新タイトル"));
+    }
+
+    #[test]
+    fn test_map_update_cli_title_overrides_ai_title() {
+        // CLI の --title が AI のタイトルより優先
+        let ai = AiEventParameters {
+            title: Some("AI title".to_string()),
+            date: None, start: None, end: None, location: None, repeat_rule: None,
+        };
+        let event = CliMapper::map_update_command(
+            "evt_1".to_string(),
+            Some("CLI title".to_string()),
+            None, None, None, "primary".to_string(),
+            false, false, false, None, None, None, None, None, None, None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        assert_eq!(event.title.as_deref(), Some("CLI title"));
+    }
+
+    #[test]
+    fn test_map_update_ai_provides_time() {
+        // AI が日時を提供 → start/end が更新される
+        let ai = AiEventParameters {
+            title: Some("朝会".to_string()),
+            date: Some("2026/3/20".to_string()),
+            start: Some("9:00".to_string()),
+            end: Some("9:30".to_string()),
+            location: None,
+            repeat_rule: None,
+        };
+        let event = CliMapper::map_update_command(
+            "evt_1".to_string(),
+            None, None, None, None, "primary".to_string(),
+            false, false, false, None, None, None, None, None, None, None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        let start = event.start.unwrap();
+        let end = event.end.unwrap();
+        assert_eq!(start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:00");
+        assert_eq!(end.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:30");
+    }
+
+    #[test]
+    fn test_map_update_ai_location() {
+        // AI が場所を提供
+        let ai = AiEventParameters {
+            title: Some("ミーティング".to_string()),
+            date: None, start: None, end: None,
+            location: Some("AI会議室".to_string()),
+            repeat_rule: None,
+        };
+        let event = CliMapper::map_update_command(
+            "evt_1".to_string(),
+            None, None, None, None, "primary".to_string(),
+            false, false, false, None, None, None, None, None, None, None, None, None,
+            today(),
+            Some(ai),
+        ).unwrap();
+        assert_eq!(event.location.as_deref(), Some("AI会議室"));
+    }
+
+    #[test]
+    fn test_map_update_no_fields_no_ai_returns_error() {
+        // 何も指定しない → エラー
+        let result = CliMapper::map_update_command(
+            "evt_1".to_string(),
+            None, None, None, None, "primary".to_string(),
+            false, false, false, None, None, None, None, None, None, None, None, None,
+            today(),
+            None,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

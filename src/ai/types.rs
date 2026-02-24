@@ -1,0 +1,12 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiEventParameters {
+    pub title: Option<String>,
+    pub date: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub location: Option<String>,
+    #[serde(default)]
+    pub repeat_rule: Option<String>, // e.g., "weekly", "monthly"
+}

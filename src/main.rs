@@ -1,14 +1,16 @@
 use chrono::Local;
 use clap::Parser;
 
+use gcal::ai::client::OllamaClient;
+use gcal::ai::output::write_ai_params;
+use gcal::ai::types::AiEventParameters;
 use gcal::app::App;
 use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{Cli, Commands};
-use gcal::config::{Config, FileTokenStore};
 use gcal::cli_mapper::CliMapper;
-
+use gcal::config::{Config, FileTokenStore};
 use gcal::error::GcalError;
 use gcal::gcal_api::client::GoogleCalendarClient;
 use gcal::ports::{SystemBrowserOpener, SystemClock};
@@ -47,21 +49,44 @@ async fn run() -> Result<(), GcalError> {
             app.handle_calendars(&mut out).await?;
         }
 
-        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, .. } => {
+        Commands::Add { title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, ai_dry_run, .. } => {
             let today = Local::now().date_naive();
+            let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+
+            if ai_dry_run {
+                let params = ai_params.as_ref().ok_or_else(|| {
+                    GcalError::ConfigError("--ai-dry-run には --ai が必要です".to_string())
+                })?;
+                let mut out = std::io::stdout();
+                write_ai_params(params, &mut out)?;
+                return Ok(());
+            }
+
             let event = CliMapper::map_add_command(
                 title, date, start, end, calendar, repeat, every, on, until, count, recur, reminder, reminders, location, today,
-                None, // AI 統合は次ステップ
+                ai_params,
             )?;
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, .. } => {
+        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, ai, ai_url, ai_model, ai_dry_run, .. } => {
             let today = Local::now().date_naive();
+            let ai_params = resolve_ai_params(ai, ai_url, ai_model, &config_path).await?;
+
+            if ai_dry_run {
+                let params = ai_params.as_ref().ok_or_else(|| {
+                    GcalError::ConfigError("--ai-dry-run には --ai が必要です".to_string())
+                })?;
+                let mut out = std::io::stdout();
+                write_ai_params(params, &mut out)?;
+                return Ok(());
+            }
+
             let event = CliMapper::map_update_command(
-                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today
+                event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, repeat, every, on, until, count, recur, reminder, reminders, location, today,
+                ai_params,
             )?;
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
@@ -132,6 +157,29 @@ fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String)
     let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
         .map_err(GcalError::IoError)?;
     Ok((client_id, client_secret))
+}
+
+/// `--ai` フラグが指定されていれば Ollama に問い合わせて AiEventParameters を返す
+///
+/// `--ai-url` / `--ai-model` は config の値を上書きする。
+/// config が存在しない場合はデフォルト値（localhost:11434 / llama3）を使用。
+async fn resolve_ai_params(
+    ai_prompt: Option<String>,
+    ai_url: Option<String>,
+    ai_model: Option<String>,
+    config_path: &std::path::Path,
+) -> Result<Option<AiEventParameters>, GcalError> {
+    let Some(prompt_str) = ai_prompt else {
+        return Ok(None);
+    };
+    let ai_config = Config::load(config_path)
+        .map(|c| c.ai)
+        .unwrap_or_default();
+    let base_url = ai_url.unwrap_or(ai_config.base_url);
+    let model = ai_model.unwrap_or(ai_config.model);
+    let client = OllamaClient::new(base_url, model);
+    let params = client.parse_prompt(&prompt_str).await?;
+    Ok(Some(params))
 }
 
 fn prompt(message: &str) -> Result<String, GcalError> {
