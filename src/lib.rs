@@ -1,3 +1,5 @@
+pub mod ai;
+pub mod alias_handler;
 pub mod app;
 pub mod parser;
 pub mod auth;

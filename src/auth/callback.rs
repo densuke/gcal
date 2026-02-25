@@ -235,4 +235,51 @@ mod tests {
         assert!(receiver.port() > 0);
         assert!(receiver.redirect_uri().contains("127.0.0.1"));
     }
+
+    #[test]
+    fn test_loopback_receiver_receive_code() {
+        use std::io::{Read, Write};
+
+        let receiver = LoopbackReceiver::bind().unwrap();
+        let port = receiver.port();
+
+        let handle = std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+            let request = "GET /callback?code=loopback_code&state=loopback_state HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        });
+
+        let cb = receiver.receive_code().unwrap();
+        let response = handle.join().unwrap();
+
+        assert_eq!(cb.code, "loopback_code");
+        assert_eq!(cb.state, "loopback_state");
+        assert!(response.contains("HTTP/1.1 200 OK"), "レスポンス: {response}");
+        assert!(response.contains("認証完了"), "レスポンス: {response}");
+    }
+
+    #[test]
+    fn test_parse_callback_from_request_line_empty_returns_error() {
+        // parts.len() < 2 のケース
+        let result = parse_callback_from_request_line("GET");
+        assert!(matches!(result, Err(GcalError::AuthError(_))));
+    }
+
+    #[test]
+    fn test_parse_callback_from_query_ignores_unknown_params() {
+        // 不明なパラメータは無視され、code と state だけ取れること
+        let cb = parse_callback_from_query("code=abc&state=xyz&extra=ignored").unwrap();
+        assert_eq!(cb.code, "abc");
+        assert_eq!(cb.state, "xyz");
+    }
+
+    #[test]
+    fn test_url_decode_invalid_percent_encoding() {
+        // 無効な16進数（%ZZ）はスキップされる
+        let result = url_decode("val%ZZue");
+        assert_eq!(result, "value");
+    }
 }

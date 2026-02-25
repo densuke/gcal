@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,11 @@ pub struct Config {
     pub credentials: Credentials,
     #[serde(default)]
     pub token: Option<TokenSection>,
+    #[serde(default)]
+    pub ai: AiConfig,
+    /// カレンダーエイリアス: エイリアス名 → Google カレンダー ID
+    #[serde(default)]
+    pub calendars: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -28,7 +34,41 @@ pub struct TokenSection {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    #[serde(default = "default_ai_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_ai_model")]
+    pub model: String,
+    #[serde(default = "default_ai_enabled")]
+    pub enabled: bool,
+}
+
+pub const DEFAULT_AI_BASE_URL: &str = "http://localhost:11434";
+pub const DEFAULT_AI_MODEL: &str = "gemma3:4b";
+const DEFAULT_AI_ENABLED: bool = true;
+
+fn default_ai_base_url() -> String { DEFAULT_AI_BASE_URL.to_string() }
+fn default_ai_model() -> String { DEFAULT_AI_MODEL.to_string() }
+fn default_ai_enabled() -> bool { DEFAULT_AI_ENABLED }
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            base_url: DEFAULT_AI_BASE_URL.to_string(),
+            model: DEFAULT_AI_MODEL.to_string(),
+            enabled: DEFAULT_AI_ENABLED,
+        }
+    }
+}
+
 impl Config {
+    /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
+    /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
+    pub fn resolve_calendar_id(&self, input: &str) -> String {
+        self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
+    }
+
     /// デフォルトの設定ファイルパスを返す（~/.config/gcal/config.toml）
     pub fn default_path() -> Result<PathBuf, GcalError> {
         let dir = dirs::config_dir()
@@ -115,6 +155,39 @@ mod tests {
         dir.path().join("gcal").join("config.toml")
     }
 
+    // --- AiConfig のデフォルト値テスト ---
+
+    #[test]
+    fn test_ai_config_default_model_is_gemma3() {
+        assert_eq!(AiConfig::default().model, "gemma3:4b");
+    }
+
+    #[test]
+    fn test_ai_config_default_base_url() {
+        assert_eq!(AiConfig::default().base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_ai_config_default_enabled() {
+        assert!(AiConfig::default().enabled);
+    }
+
+    #[test]
+    fn test_config_load_without_ai_section_uses_defaults() {
+        // v0.4.0 以前の設定ファイル（[ai] セクションなし）を読んでもデフォルト値が入る
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.ai.base_url, "http://localhost:11434");
+        assert_eq!(config.ai.model, "gemma3:4b");
+        assert!(config.ai.enabled);
+    }
+
     #[test]
     fn test_load_returns_not_initialized_when_missing() {
         let dir = TempDir::new().unwrap();
@@ -134,6 +207,8 @@ mod tests {
                 client_secret: "my_secret".to_string(),
             },
             token: None,
+            ai: AiConfig::default(),
+            calendars: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -197,6 +272,8 @@ mod tests {
                 client_secret: "csecret".to_string(),
             },
             token: None,
+            ai: AiConfig::default(),
+            calendars: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -213,5 +290,62 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.credentials.client_id, "cid");
         assert_eq!(loaded.token.unwrap().access_token, "new_acc");
+    }
+
+    // --- resolve_calendar_id のテスト ---
+
+    #[test]
+    fn test_resolve_calendar_known_alias() {
+        let mut config = Config::default();
+        config.calendars.insert("仕事".to_string(), "work@group.calendar.google.com".to_string());
+        assert_eq!(config.resolve_calendar_id("仕事"), "work@group.calendar.google.com");
+    }
+
+    #[test]
+    fn test_resolve_calendar_primary_passthrough() {
+        let config = Config::default();
+        assert_eq!(config.resolve_calendar_id("primary"), "primary");
+    }
+
+    #[test]
+    fn test_resolve_calendar_unknown_returns_input() {
+        let config = Config::default(); // エイリアスなし
+        assert_eq!(config.resolve_calendar_id("unknown_alias"), "unknown_alias");
+    }
+
+    #[test]
+    fn test_resolve_calendar_raw_id_passthrough() {
+        let config = Config::default();
+        assert_eq!(
+            config.resolve_calendar_id("abc@group.calendar.google.com"),
+            "abc@group.calendar.google.com",
+        );
+    }
+
+    #[test]
+    fn test_config_load_without_calendars_section_uses_empty_map() {
+        // v0.5.x 以前の設定ファイル（[calendars] セクションなし）でも空 HashMap になる
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.calendars.is_empty());
+    }
+
+    #[test]
+    fn test_config_save_and_load_with_calendars() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let mut config = Config::default();
+        config.credentials = Credentials { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+        config.calendars.insert("仕事".to_string(), "work@google.com".to_string());
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.calendars.get("仕事").map(|s| s.as_str()), Some("work@google.com"));
     }
 }
