@@ -71,11 +71,7 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            // calendar: CLI > AI > "primary"、その後エイリアス解決
-            let raw_calendar = calendar
-                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
-                .unwrap_or_else(|| "primary".to_string());
-            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
+            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_add_command(AddCommandInput {
                 title, date, start, end, calendar: calendar_id, location, recurrence, reminder_args, today, ai_params
@@ -102,11 +98,7 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            // calendar: CLI > AI > "primary"、その後エイリアス解決
-            let raw_calendar = calendar
-                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
-                .unwrap_or_else(|| "primary".to_string());
-            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
+            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_update_command(UpdateCommandInput {
                 event_id, calendar: calendar_id, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
@@ -162,6 +154,19 @@ async fn run() -> Result<(), GcalError> {
     }
 
     Ok(())
+}
+
+/// CLI 引数と AI パラメータからカレンダー ID を解決する。
+/// 優先順位: CLI 引数 > AI 出力 > "primary"、その後エイリアス解決
+fn resolve_calendar_from_args(
+    config_path: &std::path::Path,
+    calendar: Option<String>,
+    ai_params: Option<&AiEventParameters>,
+) -> String {
+    let raw = calendar
+        .or_else(|| ai_params.and_then(|p| p.calendar.clone()))
+        .unwrap_or_else(|| "primary".to_string());
+    resolve_calendar(config_path, &raw)
 }
 
 /// カレンダーエイリアスを Google カレンダー ID に解決する。
