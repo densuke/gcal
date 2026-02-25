@@ -427,6 +427,56 @@ mod tests {
     }
 
     #[test]
+    fn test_this_week_from_monday() {
+        // 月曜 → 今日〜同週日曜 (days_until_sunday = 6)
+        let monday = date(2026, 2, 23);
+        assert_eq!(
+            parse_date_expr("今週", monday).unwrap(),
+            range(date(2026, 2, 23), date(2026, 3, 1))
+        );
+    }
+
+    #[test]
+    fn test_this_week_from_wednesday() {
+        // 水曜 → 今日〜同週日曜 (days_until_sunday = 4)
+        let wednesday = date(2026, 2, 25);
+        assert_eq!(
+            parse_date_expr("今週", wednesday).unwrap(),
+            range(date(2026, 2, 25), date(2026, 3, 1))
+        );
+    }
+
+    #[test]
+    fn test_this_week_from_thursday() {
+        // 木曜 → 今日〜同週日曜 (days_until_sunday = 3)
+        let thursday = date(2026, 2, 26);
+        assert_eq!(
+            parse_date_expr("今週", thursday).unwrap(),
+            range(date(2026, 2, 26), date(2026, 3, 1))
+        );
+    }
+
+    #[test]
+    fn test_this_week_from_friday() {
+        // 金曜 → 今日〜同週日曜 (days_until_sunday = 2)
+        let friday = date(2026, 2, 27);
+        assert_eq!(
+            parse_date_expr("今週", friday).unwrap(),
+            range(date(2026, 2, 27), date(2026, 3, 1))
+        );
+    }
+
+    #[test]
+    fn test_this_week_from_saturday() {
+        // 土曜 → 今日〜同週日曜 (days_until_sunday = 1)
+        let saturday = date(2026, 2, 28);
+        assert_eq!(
+            parse_date_expr("今週", saturday).unwrap(),
+            range(date(2026, 2, 28), date(2026, 3, 1))
+        );
+    }
+
+    #[test]
     fn test_next_week() {
         assert_eq!(
             parse_date_expr("来週", today()).unwrap(),
@@ -715,7 +765,33 @@ mod tests {
     }
 
     #[test]
-    fn test_range_no_space_returns_error() {
+        fn test_range_no_space_returns_error() {
         assert!(parse_datetime_range_expr("9:30", today()).is_err());
+    }
+
+    #[test]
+    fn test_range_invalid_time_spec_returns_error() {
+        // split_time_and_end_spec が None → 時刻形式エラー
+        // "12:00X" は '-'/'+'以外の文字が続くので None になる
+        assert!(parse_datetime_range_expr("今日 12:00X", today()).is_err());
+    }
+
+    #[test]
+    fn test_range_invalid_time_value_returns_error() {
+        // split_time_and_end_spec は成功するが NaiveTime::parse_from_str が失敗
+        // "99:99" は HH:MM として正しい長さだが値が不正
+        assert!(parse_datetime_range_expr("今日 99:99", today()).is_err());
+    }
+
+    #[test]
+    fn test_range_invalid_absolute_end_time_returns_error() {
+        // 絶対終了時刻が不正な値
+        assert!(parse_datetime_range_expr("今日 12:00-99:99", today()).is_err());
+    }
+
+    #[test]
+    fn test_range_short_time_spec_returns_error() {
+        // "9:0" は colon_pos=1, end_of_time=4 > len=3 → split_time_and_end_spec が None
+        assert!(parse_datetime_range_expr("今日 9:0", today()).is_err());
     }
 }

@@ -499,4 +499,20 @@ mod tests {
         let result = config.resolve_event_calendars(None, Some("abc@group.calendar.google.com"));
         assert_eq!(result, vec!["abc@group.calendar.google.com"]);
     }
+
+    #[test]
+    fn test_default_path_returns_ok() {
+        // Config::default_path() が Ok を返し gcal/config.toml で終わること
+        let path = Config::default_path().expect("default_path() は Ok であるべき");
+        assert!(path.ends_with("gcal/config.toml"), "パスが期待通りでない: {:?}", path);
+    }
+
+    #[test]
+    fn test_default_ai_helpers_return_constants() {
+        // serde デフォルト helper 関数が定数と一致すること
+        assert_eq!(default_ai_base_url(), DEFAULT_AI_BASE_URL);
+        assert_eq!(default_ai_model(), DEFAULT_AI_MODEL);
+        assert!(default_ai_enabled());
+    }
 }
+
