@@ -512,6 +512,50 @@ predicates = "3"
 
 ---
 
+## バグ修正記録
+
+### 終日予定が同日の時刻付き予定より後に表示される問題（v0.6.0 開発中修正）
+
+#### 現象
+
+```
+2026-02-25 (Wed)
+  08:00  ゴミ出し
+  終日   ノー残業デー   ← 終日予定が時刻付き予定の後に出る
+```
+
+#### 原因
+
+`app.rs` の旧ソートキーが UTC の `DateTime` を直接比較していた。
+JST 08:00 の予定は UTC 前日 23:00 相当となり、終日予定の UTC 00:00 より前にソートされてしまっていた。
+
+#### 修正（`src/app.rs`）
+
+ソートキーを `(NaiveDate_ローカル日付, u8=0/1, 秒数)` に変更し、
+終日予定（`u8=0`）を同日の時刻付き予定（`u8=1`）より必ず先にする。
+
+```rust
+fn event_sort_key(start: &EventStart) -> (NaiveDate, u8, u32) {
+    match start {
+        EventStart::Date(d) => (*d, 0, 0),
+        EventStart::DateTime(dt) => {
+            let local = dt.with_timezone(&Local);
+            (local.date_naive(), 1, local.time().num_seconds_from_midnight())
+        }
+    }
+}
+```
+
+#### 結果
+
+```
+2026-02-25 (Wed)
+  終日   ノー残業デー   ← 終日予定が先頭
+  08:00  ゴミ出し
+```
+
+---
+
 ## 次バージョン向け機能計画 (v0.6.0)
 
 ### 複数カレンダー横断 events 表示
