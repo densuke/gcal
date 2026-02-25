@@ -76,9 +76,13 @@ pub enum Commands {
     },
     /// 直近のイベントを表示
     Events {
-        /// 対象カレンダーの ID（デフォルト: primary）
-        #[arg(long, default_value = "primary")]
-        calendar: String,
+        /// 対象カレンダーの ID またはエイリアス（--calendars と排他）
+        #[arg(long, conflicts_with = "calendars")]
+        calendar: Option<String>,
+        /// カンマ区切りで複数カレンダーを指定（--calendar と排他）
+        /// 例: --calendars 仕事,個人
+        #[arg(long, conflicts_with = "calendar")]
+        calendars: Option<String>,
         /// 取得する日数（--date / --from / --to と同時指定不可）
         #[arg(long, conflicts_with_all = ["date", "from", "to"])]
         days: Option<u64>,

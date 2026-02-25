@@ -53,9 +53,9 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
         }
 
         if show_ids {
-            writeln!(out, "  {:5}  {:<40}  [{}]", time_str, event.summary, event.id)?;
+            writeln!(out, "  {}  {:<40}  [{}]", pad_time_display(&time_str), event.summary, event.id)?;
         } else {
-            writeln!(out, "  {:5}  {}", time_str, event.summary)?;
+            writeln!(out, "  {}  {}", pad_time_display(&time_str), event.summary)?;
         }
     }
 
@@ -122,6 +122,37 @@ fn format_reminders(reminders: &Option<EventReminders>) -> String {
                 .join(", ")
         }
     }
+}
+
+/// 全角文字（CJK・Hiragana・Katakana 等）の表示幅を返す（全角=2, それ以外=1）
+fn char_display_width(c: char) -> usize {
+    match c as u32 {
+        0x1100..=0x115F   // Hangul Jamo
+        | 0x2329..=0x232A // Wide angle brackets
+        | 0x2E80..=0x303E // CJK Radicals / Kangxi / Punctuation
+        | 0x3041..=0x33BF // Hiragana, Katakana, Bopomofo
+        | 0x3400..=0x4DBF // CJK Extension A
+        | 0x4E00..=0x9FFF // CJK Unified Ideographs
+        | 0xA000..=0xA4CF // Yi Syllables
+        | 0xA960..=0xA97F // Hangul Jamo Extended-A
+        | 0xAC00..=0xD7AF // Hangul Syllables
+        | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+        | 0xFE10..=0xFE19 // Vertical Forms
+        | 0xFE30..=0xFE4F // CJK Compatibility Forms
+        | 0xFF01..=0xFF60 // Fullwidth Latin / Halfwidth Katakana
+        | 0xFFE0..=0xFFE6 // Fullwidth Signs
+        => 2,
+        _ => 1,
+    }
+}
+
+/// 時刻文字列をターミナル表示幅 5 になるようにスペースでパディングする。
+/// "08:00" (5) → "08:00", "終日" (4) → "終日 "
+fn pad_time_display(s: &str) -> String {
+    const TARGET: usize = 5;
+    let width: usize = s.chars().map(char_display_width).sum();
+    let padding = TARGET.saturating_sub(width);
+    format!("{}{}", s, " ".repeat(padding))
 }
 
 fn format_date(date: NaiveDate) -> String {
@@ -281,6 +312,40 @@ mod tests {
 
         assert!(s.contains("定例MTG"));
         assert!(!s.contains("abc1def2ghi3jkl4"), "ID が表示されてはいけない: {}", s);
+    }
+
+    // --- pad_time_display のテスト ---
+
+    #[test]
+    fn test_pad_time_display_ascii_5chars_no_padding() {
+        assert_eq!(pad_time_display("08:00"), "08:00");
+    }
+
+    #[test]
+    fn test_pad_time_display_ascii_4chars_pads_1() {
+        assert_eq!(pad_time_display("9:00"), "9:00 ");
+    }
+
+    #[test]
+    fn test_pad_time_display_allday_kanji_pads_1() {
+        // "終日" は2全角文字 → 表示幅4 → パディング1スペース
+        assert_eq!(pad_time_display("終日"), "終日 ");
+    }
+
+    #[test]
+    fn test_write_events_allday_no_extra_padding() {
+        // 終日予定の行で "終日" の後にスペースが多すぎないことを確認
+        // 旧バグ: {:5} で文字数5にパディング → "終日   " (3スペース) + 区切り2スペース = 5スペース
+        // 修正後: 表示幅5にパディング → "終日 " (1スペース) + 区切り2スペース = 3スペース
+        let events = vec![make_event_allday("1", "祝日", 2026, 2, 24)];
+        let mut out = Vec::new();
+        write_events(&mut out, &events, false).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        let allday_line = s.lines().find(|l| l.contains("祝日")).unwrap();
+        // 修正後: "終日" の後ろは3スペース (パディング1 + 区切り2)
+        assert!(allday_line.contains("終日   "), "パディングが正しくない: {:?}", allday_line);
+        // 旧バグがないことを確認: 4スペース以上は NG
+        assert!(!allday_line.contains("終日    "), "過剰パディングがある: {:?}", allday_line);
     }
 
     #[test]

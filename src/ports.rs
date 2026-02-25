@@ -68,3 +68,19 @@ impl BrowserOpener for SystemBrowserOpener {
         open::that(url).map_err(|e| GcalError::IoError(e))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    #[test]
+    fn test_system_clock_returns_current_time() {
+        let before = Utc::now();
+        let result = SystemClock.now();
+        let after = Utc::now();
+        // SystemClock::now() が before〜after の範囲内であること
+        assert!(result >= before - Duration::seconds(1));
+        assert!(result <= after + Duration::seconds(1));
+    }
+}

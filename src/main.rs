@@ -71,11 +71,7 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            // calendar: CLI > AI > "primary"、その後エイリアス解決
-            let raw_calendar = calendar
-                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
-                .unwrap_or_else(|| "primary".to_string());
-            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
+            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_add_command(AddCommandInput {
                 title, date, start, end, calendar: calendar_id, location, recurrence, reminder_args, today, ai_params
@@ -102,11 +98,7 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            // calendar: CLI > AI > "primary"、その後エイリアス解決
-            let raw_calendar = calendar
-                .or_else(|| ai_params.as_ref().and_then(|p| p.calendar.clone()))
-                .unwrap_or_else(|| "primary".to_string());
-            let calendar_id = resolve_calendar(&config_path, &raw_calendar);
+            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_update_command(UpdateCommandInput {
                 event_id, calendar: calendar_id, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
@@ -144,8 +136,12 @@ async fn run() -> Result<(), GcalError> {
             app.handle_delete_event(&calendar_id, &event_id, &mut out).await?;
         }
 
-        Commands::Events { calendar, days, date, from, to, ids } => {
-            let calendar_id = resolve_calendar(&config_path, &calendar);
+        Commands::Events { calendar, calendars, days, date, from, to, ids } => {
+            let config = Config::load(&config_path).unwrap_or_default();
+            let calendar_ids = config.resolve_event_calendars(
+                calendar.as_deref(),
+                calendars.as_deref(),
+            );
             let today = Local::now().date_naive();
             let (time_min, time_max) = CliMapper::map_events_command(
                 date, from, to, days.map(|x| x as u64), today
@@ -153,11 +149,24 @@ async fn run() -> Result<(), GcalError> {
 
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_events(&calendar_id, time_min, time_max, ids, &mut out).await?;
+            app.handle_events(&calendar_ids, time_min, time_max, ids, &mut out).await?;
         }
     }
 
     Ok(())
+}
+
+/// CLI 引数と AI パラメータからカレンダー ID を解決する。
+/// 優先順位: CLI 引数 > AI 出力 > "primary"、その後エイリアス解決
+fn resolve_calendar_from_args(
+    config_path: &std::path::Path,
+    calendar: Option<String>,
+    ai_params: Option<&AiEventParameters>,
+) -> String {
+    let raw = calendar
+        .or_else(|| ai_params.and_then(|p| p.calendar.clone()))
+        .unwrap_or_else(|| "primary".to_string());
+    resolve_calendar(config_path, &raw)
 }
 
 /// カレンダーエイリアスを Google カレンダー ID に解決する。

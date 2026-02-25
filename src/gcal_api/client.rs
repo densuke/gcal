@@ -9,6 +9,22 @@ use crate::ports::{CalendarClient, TokenProvider};
 
 const DEFAULT_BASE_URL: &str = "https://www.googleapis.com/calendar/v3";
 
+/// ローカルタイムゾーン名を返す。取得できない場合は "UTC" を使用する。
+fn local_timezone() -> String {
+    iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string())
+}
+
+/// HTTP レスポンスのステータスを確認し、エラー時は ApiError を返す。
+/// 成功時はレスポンス自体を返し、呼び出し元が続けて `.json()` 等に使用できる。
+async fn check_response_status(resp: reqwest::Response) -> Result<reqwest::Response, GcalError> {
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let message = resp.text().await.unwrap_or_default();
+        return Err(GcalError::ApiError { status, message });
+    }
+    Ok(resp)
+}
+
 pub struct GoogleCalendarClient<T: TokenProvider> {
     http: reqwest::Client,
     base_url: String,
@@ -47,12 +63,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let message = resp.text().await.unwrap_or_default();
-            return Err(GcalError::ApiError { status, message });
-        }
-
+        let resp = check_response_status(resp).await?;
         let body: CalendarListResponse = resp.json().await?;
         let items = body
             .items
@@ -88,12 +99,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let message = resp.text().await.unwrap_or_default();
-            return Err(GcalError::ApiError { status, message });
-        }
-
+        let resp = check_response_status(resp).await?;
         let body: EventListResponse = resp.json().await?;
         let mut events = Vec::new();
 
@@ -129,7 +135,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
         let token = self.token_provider.access_token().await?;
         let url = format!("{}/calendars/{}/events", self.base_url, event.calendar_id);
 
-        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+        let tz = local_timezone();
         let req = CreateEventRequest {
             summary: event.summary,
             start: EventTimeSpec {
@@ -153,12 +159,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let message = resp.text().await.unwrap_or_default();
-            return Err(GcalError::ApiError { status, message });
-        }
-
+        let resp = check_response_status(resp).await?;
         let body: CreateEventResponse = resp.json().await?;
         Ok(body.id)
     }
@@ -170,7 +171,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             self.base_url, event.calendar_id, event.event_id
         );
 
-        let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+        let tz = local_timezone();
         let req = PatchEventRequest {
             summary: event.title,
             start: event.start.map(|dt| EventTimeSpec {
@@ -194,11 +195,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let message = resp.text().await.unwrap_or_default();
-            return Err(GcalError::ApiError { status, message });
-        }
+        check_response_status(resp).await?;
 
         Ok(())
     }
@@ -214,11 +211,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let message = resp.text().await.unwrap_or_default();
-            return Err(GcalError::ApiError { status, message });
-        }
+        check_response_status(resp).await?;
 
         Ok(())
     }

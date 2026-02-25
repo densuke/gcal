@@ -1,9 +1,11 @@
-use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 use crate::ai::types::AiEventParameters;
-use crate::error::GcalError;
 use crate::domain::{NewEvent, UpdateEvent};
-use crate::parser::{parse_datetime_expr, parse_datetime_range_expr, parse_end_expr, resolve_event_range};
+use crate::error::GcalError;
+use crate::parser::{
+    parse_datetime_expr, parse_datetime_range_expr, parse_end_expr, resolve_event_range,
+};
 use crate::parser::{parse_recurrence, parse_reminders};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 
 pub struct AddCommandInput {
     pub title: Option<String>,
@@ -78,8 +80,16 @@ pub struct CliMapper;
 impl CliMapper {
     pub fn map_add_command(input: AddCommandInput) -> Result<NewEvent, GcalError> {
         let AddCommandInput {
-            title, date, start, end, calendar, location,
-            recurrence, reminder_args, today, ai_params
+            title,
+            date,
+            start,
+            end,
+            calendar,
+            location,
+            recurrence,
+            reminder_args,
+            today,
+            ai_params,
         } = input;
         let effective_title = title
             .or_else(|| ai_params.as_ref().and_then(|p| p.title.clone()))
@@ -89,24 +99,24 @@ impl CliMapper {
                 )
             })?;
 
-        let effective_location = location
-            .or_else(|| ai_params.as_ref().and_then(|p| p.location.clone()));
+        let effective_location =
+            location.or_else(|| ai_params.as_ref().and_then(|p| p.location.clone()));
 
         let (start_dt, end_dt) = if let Some(d) = date {
             parse_datetime_range_expr(&d, today)?
         } else {
-            let start_str = start.or_else(|| {
-                ai_params.as_ref().and_then(|p| {
-                    match (&p.date, &p.start) {
+            let start_str = start
+                .or_else(|| {
+                    ai_params.as_ref().and_then(|p| match (&p.date, &p.start) {
                         (Some(d), Some(t)) => Some(format!("{d} {t}")),
                         _ => None,
-                    }
+                    })
                 })
-            }).ok_or_else(|| {
-                GcalError::ConfigError(
-                    "--date か --start（または --ai）で日時を指定してください".to_string(),
-                )
-            })?;
+                .ok_or_else(|| {
+                    GcalError::ConfigError(
+                        "--date か --start（または --ai）で日時を指定してください".to_string(),
+                    )
+                })?;
 
             let start_dt = parse_datetime_expr(&start_str, today)?;
 
@@ -119,13 +129,18 @@ impl CliMapper {
         };
 
         let recurrence_payload = parse_recurrence_args(recurrence, today)?;
-        let reminders_payload = if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
-            parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
-        } else if let Some(ref ai) = ai_params {
-            ai.reminder.as_deref().map(|r| parse_ai_reminders(r, Some(start_dt))).transpose()?.flatten()
-        } else {
-            None
-        };
+        let reminders_payload =
+            if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
+                parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
+            } else if let Some(ref ai) = ai_params {
+                ai.reminder
+                    .as_deref()
+                    .map(|r| parse_ai_reminders(r, Some(start_dt)))
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
 
         Ok(NewEvent {
             summary: effective_title,
@@ -140,15 +155,33 @@ impl CliMapper {
 
     pub fn map_update_command(input: UpdateCommandInput) -> Result<UpdateEvent, GcalError> {
         let UpdateCommandInput {
-            event_id, calendar, title, date, start, end,
-            clear_repeat, clear_reminders, clear_location, location,
-            recurrence, reminder_args, today, ai_params
+            event_id,
+            calendar,
+            title,
+            date,
+            start,
+            end,
+            clear_repeat,
+            clear_reminders,
+            clear_location,
+            location,
+            recurrence,
+            reminder_args,
+            today,
+            ai_params,
         } = input;
         // CLI か AI のいずれかで何か更新対象が必要
-        let has_cli_update = title.is_some() || start.is_some() || date.is_some()
-            || recurrence.repeat.is_some() || recurrence.recur.is_some() || reminder_args.reminder.is_some()
-            || reminder_args.reminders.is_some() || location.is_some()
-            || clear_repeat || clear_reminders || clear_location;
+        let has_cli_update = title.is_some()
+            || start.is_some()
+            || date.is_some()
+            || recurrence.repeat.is_some()
+            || recurrence.recur.is_some()
+            || reminder_args.reminder.is_some()
+            || reminder_args.reminders.is_some()
+            || location.is_some()
+            || clear_repeat
+            || clear_reminders
+            || clear_location;
         if !has_cli_update && ai_params.is_none() {
             return Err(GcalError::ConfigError(
                 "更新する項目 (--title / --start / --date / --location / --ai など) を指定してください".to_string(),
@@ -175,7 +208,11 @@ impl CliMapper {
                     let combined = format!("{d} {t}");
                     let start_dt = parse_datetime_expr(&combined, today)?;
                     let end_dt = match &ai.end {
-                        Some(e) => Some(parse_end_expr(&normalize_ai_end(e, &start_dt), start_dt, today)?),
+                        Some(e) => Some(parse_end_expr(
+                            &normalize_ai_end(e, &start_dt),
+                            start_dt,
+                            today,
+                        )?),
                         None => Some(start_dt + Duration::hours(1)),
                     };
                     (Some(start_dt), end_dt)
@@ -200,7 +237,11 @@ impl CliMapper {
         } else if reminder_args.reminder.is_some() || reminder_args.reminders.is_some() {
             parse_reminders(reminder_args.reminder, reminder_args.reminders.as_deref())?
         } else if let Some(ref ai) = ai_params {
-            ai.reminder.as_deref().map(|r| parse_ai_reminders(r, start_dt)).transpose()?.flatten()
+            ai.reminder
+                .as_deref()
+                .map(|r| parse_ai_reminders(r, start_dt))
+                .transpose()?
+                .flatten()
         } else {
             None
         };
@@ -230,13 +271,8 @@ impl CliMapper {
         days: Option<u64>,
         today: NaiveDate,
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), GcalError> {
-        let range = resolve_event_range(
-            date.as_deref(),
-            from.as_deref(),
-            to.as_deref(),
-            days,
-            today,
-        )?;
+        let range =
+            resolve_event_range(date.as_deref(), from.as_deref(), to.as_deref(), days, today)?;
 
         let time_min = naive_date_to_utc_start(range.from)?;
         let time_max = naive_date_to_utc_end(range.to)?;
@@ -262,7 +298,10 @@ fn normalize_ai_end(end: &str, start: &DateTime<Local>) -> String {
 }
 
 /// RecurrenceArgs の各フィールドを parse_recurrence に委譲するヘルパー
-fn parse_recurrence_args(r: crate::cli::RecurrenceArgs, today: NaiveDate) -> Result<Option<Vec<String>>, GcalError> {
+fn parse_recurrence_args(
+    r: crate::cli::RecurrenceArgs,
+    today: NaiveDate,
+) -> Result<Option<Vec<String>>, GcalError> {
     parse_recurrence(
         r.repeat.as_deref(),
         r.every,
@@ -276,8 +315,12 @@ fn parse_recurrence_args(r: crate::cli::RecurrenceArgs, today: NaiveDate) -> Res
 
 /// AI がカンマ区切りで返す reminder 文字列を EventReminders に変換するヘルパー。
 /// "popup:prev-HH:MM" 形式は start を使って分数に変換する。
-fn parse_ai_reminders(s: &str, start: Option<DateTime<Local>>) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
-    let resolved: Result<Vec<String>, GcalError> = s.split(',')
+fn parse_ai_reminders(
+    s: &str,
+    start: Option<DateTime<Local>>,
+) -> Result<Option<crate::gcal_api::models::EventReminders>, GcalError> {
+    let resolved: Result<Vec<String>, GcalError> = s
+        .split(',')
         .map(|r| r.trim().to_string())
         .filter(|r| !r.is_empty())
         .map(|item| resolve_ai_reminder_item(&item, start))
@@ -287,19 +330,22 @@ fn parse_ai_reminders(s: &str, start: Option<DateTime<Local>>) -> Result<Option<
 
 /// "method:prev-HH:MM" 形式を "method:Xm"（開始時刻から X 分前）に変換する。
 /// 非 prev 形式はそのまま返す。
-fn resolve_ai_reminder_item(item: &str, start: Option<DateTime<Local>>) -> Result<String, GcalError> {
+fn resolve_ai_reminder_item(
+    item: &str,
+    start: Option<DateTime<Local>>,
+) -> Result<String, GcalError> {
     if let Some((method, after_colon)) = item.split_once(':') {
         if let Some(time_str) = after_colon.strip_prefix("prev-") {
-            let start_dt = start.ok_or_else(|| GcalError::ConfigError(
-                "「前日HH時」リマインダーには開始日時が必要です".to_string()
-            ))?;
+            let start_dt = start.ok_or_else(|| {
+                GcalError::ConfigError("「前日HH時」リマインダーには開始日時が必要です".to_string())
+            })?;
             if let Some((hh_str, mm_str)) = time_str.split_once(':') {
-                let hh: u32 = hh_str.parse().map_err(|_| GcalError::ConfigError(
-                    format!("無効な時刻指定: {}", time_str)
-                ))?;
-                let mm: u32 = mm_str.parse().map_err(|_| GcalError::ConfigError(
-                    format!("無効な時刻指定: {}", time_str)
-                ))?;
+                let hh: u32 = hh_str
+                    .parse()
+                    .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
+                let mm: u32 = mm_str
+                    .parse()
+                    .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
                 let start_mins = start_dt.hour() * 60 + start_dt.minute();
                 let prev_mins = hh * 60 + mm;
                 let total = start_mins + (24 * 60 - prev_mins);
@@ -327,32 +373,32 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
 }
 
 #[cfg(test)]
-    mod tests {
-        use super::*;
-        use chrono::NaiveDate;
-        use crate::ai::types::AiEventParameters;
+mod tests {
+    use super::*;
+    use crate::ai::types::AiEventParameters;
+    use chrono::NaiveDate;
 
-        fn today() -> NaiveDate {
-            NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 2, 24).unwrap()
+    }
+
+    fn make_add_input() -> AddCommandInput {
+        AddCommandInput {
+            calendar: "primary".to_string(),
+            today: today(),
+            ..Default::default()
         }
+    }
 
-        fn make_add_input() -> AddCommandInput {
-            AddCommandInput {
-                calendar: "primary".to_string(),
-                today: today(),
-                ..Default::default()
-            }
+    fn make_update_input() -> UpdateCommandInput {
+        UpdateCommandInput {
+            calendar: "primary".to_string(),
+            today: today(),
+            ..Default::default()
         }
+    }
 
-        fn make_update_input() -> UpdateCommandInput {
-            UpdateCommandInput {
-                calendar: "primary".to_string(),
-                today: today(),
-                ..Default::default()
-            }
-        }
-
-        // --- map_add_command: リグレッションテスト ---
+    // --- map_add_command: リグレッションテスト ---
 
     #[test]
     fn test_map_add_command_all_args() {
@@ -373,13 +419,25 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
                 reminders: None,
             },
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(event.summary, "Test Event");
         assert_eq!(event.calendar_id, "primary");
-        assert_eq!(event.start.format("%Y-%m-%d %H:%M").to_string(), "2026-05-10 10:00");
-        assert_eq!(event.end.format("%Y-%m-%d %H:%M").to_string(), "2026-05-10 11:00");
-        assert_eq!(event.recurrence, Some(vec!["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5".to_string()]));
+        assert_eq!(
+            event.start.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-05-10 10:00"
+        );
+        assert_eq!(
+            event.end.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-05-10 11:00"
+        );
+        assert_eq!(
+            event.recurrence,
+            Some(vec![
+                "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5".to_string()
+            ])
+        );
         assert_eq!(event.reminders.unwrap().overrides.unwrap().len(), 1);
         assert_eq!(event.location.unwrap(), "Tokyo Tower");
     }
@@ -395,7 +453,10 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         });
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("タイトル"), "エラーメッセージにタイトルが含まれていません: {msg}");
+        assert!(
+            msg.contains("タイトル"),
+            "エラーメッセージにタイトルが含まれていません: {msg}"
+        );
     }
 
     #[test]
@@ -411,7 +472,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.summary, "AI MTG");
     }
 
@@ -428,7 +490,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             title: Some("CLI title".to_string()),
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.summary, "CLI title");
     }
 
@@ -450,9 +513,16 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
-        assert_eq!(event.start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:00");
-        assert_eq!(event.end.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:30");
+        })
+        .unwrap();
+        assert_eq!(
+            event.start.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-03-20 09:00"
+        );
+        assert_eq!(
+            event.end.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-03-20 09:30"
+        );
     }
 
     #[test]
@@ -471,7 +541,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.start.format("%H:%M").to_string(), "14:00");
         assert_eq!(event.end.format("%H:%M").to_string(), "15:00");
     }
@@ -493,8 +564,12 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             start: Some("2026/3/20 14:00".to_string()),
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
-        assert_eq!(event.start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 14:00");
+        })
+        .unwrap();
+        assert_eq!(
+            event.start.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-03-20 14:00"
+        );
     }
 
     #[test]
@@ -535,7 +610,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.location.as_deref(), Some("会議室A"));
     }
 
@@ -556,7 +632,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             location: Some("CLI 場所".to_string()),
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.location.as_deref(), Some("CLI 場所"));
     }
 
@@ -565,27 +642,45 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
     #[test]
     fn test_normalize_ai_end_relative_unchanged() {
         // "+1h" はそのまま
-        let start = Local.from_local_datetime(
-            &NaiveDate::from_ymd_opt(2026, 3, 20).unwrap().and_hms_opt(10, 0, 0).unwrap()
-        ).single().unwrap();
+        let start = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 3, 20)
+                    .unwrap()
+                    .and_hms_opt(10, 0, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
         assert_eq!(normalize_ai_end("+1h", &start), "+1h");
     }
 
     #[test]
     fn test_normalize_ai_end_time_only_combined_with_start_date() {
         // "11:00" → "2026/03/20 11:00"
-        let start = Local.from_local_datetime(
-            &NaiveDate::from_ymd_opt(2026, 3, 20).unwrap().and_hms_opt(10, 0, 0).unwrap()
-        ).single().unwrap();
+        let start = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 3, 20)
+                    .unwrap()
+                    .and_hms_opt(10, 0, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
         assert_eq!(normalize_ai_end("11:00", &start), "2026/03/20 11:00");
     }
 
     #[test]
     fn test_normalize_ai_end_full_datetime_unchanged() {
         // スペース付きの日時はそのまま
-        let start = Local.from_local_datetime(
-            &NaiveDate::from_ymd_opt(2026, 3, 20).unwrap().and_hms_opt(10, 0, 0).unwrap()
-        ).single().unwrap();
+        let start = Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(2026, 3, 20)
+                    .unwrap()
+                    .and_hms_opt(10, 0, 0)
+                    .unwrap(),
+            )
+            .single()
+            .unwrap();
         assert_eq!(normalize_ai_end("明日 15:00", &start), "明日 15:00");
     }
 
@@ -599,7 +694,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             clear_reminders: true,
             clear_location: true,
             ..make_update_input()
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(event.event_id, "event_123");
         assert_eq!(event.title, None);
@@ -615,7 +711,11 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         // AI がタイトルを提供 → タイトルが更新される
         let ai = AiEventParameters {
             title: Some("AI更新タイトル".to_string()),
-            date: None, start: None, end: None, location: None, repeat_rule: None,
+            date: None,
+            start: None,
+            end: None,
+            location: None,
+            repeat_rule: None,
             reminder: None,
             calendar: None,
         };
@@ -623,7 +723,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             event_id: "evt_1".to_string(),
             ai_params: Some(ai),
             ..make_update_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.title.as_deref(), Some("AI更新タイトル"));
     }
 
@@ -632,7 +733,11 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         // CLI の --title が AI のタイトルより優先
         let ai = AiEventParameters {
             title: Some("AI title".to_string()),
-            date: None, start: None, end: None, location: None, repeat_rule: None,
+            date: None,
+            start: None,
+            end: None,
+            location: None,
+            repeat_rule: None,
             reminder: None,
             calendar: None,
         };
@@ -641,7 +746,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             title: Some("CLI title".to_string()),
             ai_params: Some(ai),
             ..make_update_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.title.as_deref(), Some("CLI title"));
     }
 
@@ -662,10 +768,14 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             event_id: "evt_1".to_string(),
             ai_params: Some(ai),
             ..make_update_input()
-        }).unwrap();
+        })
+        .unwrap();
         let start = event.start.unwrap();
         let end = event.end.unwrap();
-        assert_eq!(start.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:00");
+        assert_eq!(
+            start.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-03-20 09:00"
+        );
         assert_eq!(end.format("%Y-%m-%d %H:%M").to_string(), "2026-03-20 09:30");
     }
 
@@ -674,7 +784,9 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         // AI が場所を提供
         let ai = AiEventParameters {
             title: Some("ミーティング".to_string()),
-            date: None, start: None, end: None,
+            date: None,
+            start: None,
+            end: None,
             location: Some("AI会議室".to_string()),
             repeat_rule: None,
             reminder: None,
@@ -684,7 +796,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             event_id: "evt_1".to_string(),
             ai_params: Some(ai),
             ..make_update_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(event.location.as_deref(), Some("AI会議室"));
     }
 
@@ -706,7 +819,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         let rem = event.reminders.unwrap();
         assert!(!rem.use_default);
         let overrides = rem.overrides.unwrap();
@@ -730,7 +844,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert!(event.reminders.is_none());
     }
 
@@ -754,7 +869,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             },
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         let overrides = event.reminders.unwrap().overrides.unwrap();
         assert_eq!(overrides[0].method, "popup");
         assert_eq!(overrides[0].minutes, 30);
@@ -767,7 +883,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
             title: Some("MTG".to_string()),
             date: Some("2026/3/20 10:00-11:00".to_string()),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         assert!(event.reminders.is_none());
     }
 
@@ -787,7 +904,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         let overrides = event.reminders.unwrap().overrides.unwrap();
         assert_eq!(overrides.len(), 2);
         assert_eq!(overrides[0].method, "popup");
@@ -800,7 +918,9 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
     fn test_resolve_ai_reminder_item_prev_format_08_30() {
         // event 08:30, 前日19時 → (8*60+30)+(24-19)*60 = 510+300 = 810m
         use chrono::TimeZone;
-        let start = chrono::Local.with_ymd_and_hms(2026, 3, 20, 8, 30, 0).unwrap();
+        let start = chrono::Local
+            .with_ymd_and_hms(2026, 3, 20, 8, 30, 0)
+            .unwrap();
         let result = resolve_ai_reminder_item("popup:prev-19:00", Some(start)).unwrap();
         assert_eq!(result, "popup:810m");
     }
@@ -809,7 +929,9 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
     fn test_resolve_ai_reminder_item_prev_format_10_00() {
         // event 10:00, 前日17時 → (10*60+0)+(24-17)*60 = 600+420 = 1020m
         use chrono::TimeZone;
-        let start = chrono::Local.with_ymd_and_hms(2026, 3, 1, 10, 0, 0).unwrap();
+        let start = chrono::Local
+            .with_ymd_and_hms(2026, 3, 1, 10, 0, 0)
+            .unwrap();
         let result = resolve_ai_reminder_item("popup:prev-17:00", Some(start)).unwrap();
         assert_eq!(result, "popup:1020m");
     }
@@ -844,7 +966,8 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
         let event = CliMapper::map_add_command(AddCommandInput {
             ai_params: Some(ai),
             ..make_add_input()
-        }).unwrap();
+        })
+        .unwrap();
         let overrides = event.reminders.unwrap().overrides.unwrap();
         assert_eq!(overrides.len(), 2);
         assert_eq!(overrides[0].method, "popup");
@@ -867,12 +990,22 @@ pub fn naive_date_to_utc_end(date: NaiveDate) -> Result<DateTime<Utc>, GcalError
     fn test_map_events_command() {
         let today = NaiveDate::from_ymd_opt(2026, 2, 24).unwrap();
         let (min, max) = CliMapper::map_events_command(
-            None, Some("2026/3/1".to_string()), Some("2026/3/15".to_string()), None, today
-        ).unwrap();
+            None,
+            Some("2026/3/1".to_string()),
+            Some("2026/3/15".to_string()),
+            None,
+            today,
+        )
+        .unwrap();
         let local_min = min.with_timezone(&Local);
         let local_max = max.with_timezone(&Local);
-        assert_eq!(local_min.date_naive(), NaiveDate::from_ymd_opt(2026, 3, 1).unwrap());
-        assert_eq!(local_max.date_naive(), NaiveDate::from_ymd_opt(2026, 3, 15).unwrap());
+        assert_eq!(
+            local_min.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()
+        );
+        assert_eq!(
+            local_max.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 3, 15).unwrap()
+        );
     }
 }
-

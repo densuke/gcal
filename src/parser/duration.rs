@@ -76,4 +76,22 @@ mod tests {
     fn test_duration_invalid_returns_error() {
         assert!(parse_duration_str("+abc").is_err());
     }
+
+    #[test]
+    fn test_duration_plus_only_returns_error() {
+        // "+" のみ（値なし）→ "相対時間の値がありません" エラー
+        assert!(parse_duration_str("+").is_err());
+    }
+
+    #[test]
+    fn test_duration_invalid_hours_digit_returns_error() {
+        // 時間部分が数値でない → parse::<i64>() 失敗パス
+        assert!(parse_duration_str("+xh").is_err());
+    }
+
+    #[test]
+    fn test_duration_invalid_minutes_digit_returns_error() {
+        // 分部分が数値でない（時間部分は OK）→ parse::<i64>() 失敗パス
+        assert!(parse_duration_str("+1hxm").is_err());
+    }
 }

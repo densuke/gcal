@@ -68,6 +68,7 @@ mod tests {
             token: None,
             ai: AiConfig::default(),
             calendars: Default::default(),
+            events: Default::default(),
         };
         config.save(path).unwrap();
     }

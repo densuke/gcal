@@ -7,6 +7,15 @@ use crate::domain::StoredTokens;
 use crate::error::GcalError;
 use crate::ports::TokenStore;
 
+/// `gcal events` コマンドの設定
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EventsConfig {
+    /// events コマンドでデフォルトに使うカレンダー（エイリアス名または生 ID）
+    /// 省略時は空 → "primary" にフォールバック
+    #[serde(default)]
+    pub default_calendars: Vec<String>,
+}
+
 /// 設定ファイル全体の構造
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -19,6 +28,9 @@ pub struct Config {
     /// カレンダーエイリアス: エイリアス名 → Google カレンダー ID
     #[serde(default)]
     pub calendars: HashMap<String, String>,
+    /// events コマンドの設定
+    #[serde(default)]
+    pub events: EventsConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,6 +79,38 @@ impl Config {
     /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
     pub fn resolve_calendar_id(&self, input: &str) -> String {
         self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
+    }
+
+    /// CLI 引数と設定から events コマンド用カレンダー ID リストを解決する。
+    ///
+    /// 優先順位:
+    /// 1. `calendars` (--calendars カンマ区切り) が Some → 分割・解決・重複除去
+    /// 2. `calendar` (--calendar 単一) が Some → 解決して 1 要素 Vec
+    /// 3. 両方 None → `config.events.default_calendars` を解決（空なら ["primary"]）
+    pub fn resolve_event_calendars(
+        &self,
+        calendar: Option<&str>,
+        calendars: Option<&str>,
+    ) -> Vec<String> {
+        if let Some(multi) = calendars {
+            let mut seen = std::collections::HashSet::new();
+            return multi
+                .split(',')
+                .map(|s| self.resolve_calendar_id(s.trim()))
+                .filter(|id| seen.insert(id.clone()))
+                .collect();
+        }
+        if let Some(single) = calendar {
+            return vec![self.resolve_calendar_id(single)];
+        }
+        // config デフォルト
+        if !self.events.default_calendars.is_empty() {
+            return self.events.default_calendars
+                .iter()
+                .map(|s| self.resolve_calendar_id(s))
+                .collect();
+        }
+        vec!["primary".to_string()]
     }
 
     /// デフォルトの設定ファイルパスを返す（~/.config/gcal/config.toml）
@@ -209,6 +253,7 @@ mod tests {
             token: None,
             ai: AiConfig::default(),
             calendars: Default::default(),
+            events: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -274,6 +319,7 @@ mod tests {
             token: None,
             ai: AiConfig::default(),
             calendars: Default::default(),
+            events: Default::default(),
         };
         config.save(&path).unwrap();
 
@@ -348,4 +394,125 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.calendars.get("仕事").map(|s| s.as_str()), Some("work@google.com"));
     }
+
+    // --- EventsConfig のテスト ---
+
+    #[test]
+    fn test_events_config_default_is_empty() {
+        assert!(EventsConfig::default().default_calendars.is_empty());
+    }
+
+    #[test]
+    fn test_config_load_without_events_section_uses_default() {
+        // [events] セクションなしの旧設定ファイルでも空になる（後方互換）
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n").unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.events.default_calendars.is_empty());
+    }
+
+    #[test]
+    fn test_config_save_and_load_with_events() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+        let mut config = Config::default();
+        config.credentials = Credentials { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+        config.events.default_calendars = vec!["仕事".to_string(), "個人".to_string()];
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.events.default_calendars, vec!["仕事", "個人"]);
+    }
+
+    // --- resolve_event_calendars のテスト ---
+
+    fn config_with_aliases() -> Config {
+        let mut config = Config::default();
+        config.calendars.insert("仕事".to_string(), "work@group.calendar.google.com".to_string());
+        config.calendars.insert("個人".to_string(), "personal@group.calendar.google.com".to_string());
+        config
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_single_flag() {
+        // --calendar 仕事 → エイリアス解決して単一要素 Vec
+        let config = config_with_aliases();
+        let result = config.resolve_event_calendars(Some("仕事"), None);
+        assert_eq!(result, vec!["work@group.calendar.google.com"]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_multi_flag() {
+        // --calendars 仕事,個人 → カンマ分割してエイリアス解決
+        let config = config_with_aliases();
+        let result = config.resolve_event_calendars(None, Some("仕事,個人"));
+        assert_eq!(result, vec![
+            "work@group.calendar.google.com",
+            "personal@group.calendar.google.com",
+        ]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_multi_flag_with_spaces() {
+        // --calendars "仕事, 個人" → trim して解決
+        let config = config_with_aliases();
+        let result = config.resolve_event_calendars(None, Some("仕事, 個人"));
+        assert_eq!(result, vec![
+            "work@group.calendar.google.com",
+            "personal@group.calendar.google.com",
+        ]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_deduplication() {
+        // --calendars 仕事,仕事 → 重複除去して1件
+        let config = config_with_aliases();
+        let result = config.resolve_event_calendars(None, Some("仕事,仕事"));
+        assert_eq!(result, vec!["work@group.calendar.google.com"]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_uses_config_defaults() {
+        // --calendar / --calendars 未指定 → config.events.default_calendars を使う
+        let mut config = config_with_aliases();
+        config.events.default_calendars = vec!["仕事".to_string(), "個人".to_string()];
+        let result = config.resolve_event_calendars(None, None);
+        assert_eq!(result, vec![
+            "work@group.calendar.google.com",
+            "personal@group.calendar.google.com",
+        ]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_fallback_to_primary() {
+        // 何も指定なし・config も空 → ["primary"]
+        let config = Config::default();
+        let result = config.resolve_event_calendars(None, None);
+        assert_eq!(result, vec!["primary"]);
+    }
+
+    #[test]
+    fn test_resolve_event_calendars_raw_id_passthrough() {
+        // エイリアス未登録の生 ID はそのまま通る
+        let config = Config::default();
+        let result = config.resolve_event_calendars(None, Some("abc@group.calendar.google.com"));
+        assert_eq!(result, vec!["abc@group.calendar.google.com"]);
+    }
+
+    #[test]
+    fn test_default_path_returns_ok() {
+        // Config::default_path() が Ok を返し gcal/config.toml で終わること
+        let path = Config::default_path().expect("default_path() は Ok であるべき");
+        assert!(path.ends_with("gcal/config.toml"), "パスが期待通りでない: {:?}", path);
+    }
+
+    #[test]
+    fn test_default_ai_helpers_return_constants() {
+        // serde デフォルト helper 関数が定数と一致すること
+        assert_eq!(default_ai_base_url(), DEFAULT_AI_BASE_URL);
+        assert_eq!(default_ai_model(), DEFAULT_AI_MODEL);
+        assert!(default_ai_enabled());
+    }
 }
+
