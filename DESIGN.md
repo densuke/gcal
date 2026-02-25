@@ -554,6 +554,46 @@ fn event_sort_key(start: &EventStart) -> (NaiveDate, u8, u32) {
   08:00  ゴミ出し
 ```
 
+### 終日ラベルの表示幅ずれ問題（v0.6.0 開発中修正）
+
+#### 現象
+
+```
+2026-02-25 (Wed)
+  終日     ノー残業デー   ← "終日" のタイトルが右にずれる
+  08:00  ゴミ出し        ← "08:00" のタイトルは正常位置
+```
+
+#### 原因
+
+`output.rs` のフォーマット指定 `{:5}` は**文字数**で5になるようパディングする。
+`"終日"` は2文字なので3スペース補填 → 合計5文字・**7表示幅**。
+`"08:00"` は5文字 = 5表示幅。表示上2カラム分ずれる。
+
+#### 修正（`src/output.rs`）
+
+`unicode-width` クレート非依存のインライン実装で全角文字を幅2として計算する
+`char_display_width` + `pad_time_display` を追加。
+
+```rust
+fn pad_time_display(s: &str) -> String {
+    const TARGET: usize = 5;
+    let width: usize = s.chars().map(char_display_width).sum();
+    let padding = TARGET.saturating_sub(width);
+    format!("{}{}", s, " ".repeat(padding))
+}
+```
+
+`{:5}` を `pad_time_display(&time_str)` に置き換え（`show_ids` 有無の両パス）。
+
+#### 結果
+
+```
+2026-02-25 (Wed)
+  終日   ノー残業デー   ← タイトル列が揃う
+  08:00  ゴミ出し
+```
+
 ---
 
 ## 次バージョン向け機能計画 (v0.6.0)
