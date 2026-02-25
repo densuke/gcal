@@ -144,8 +144,12 @@ async fn run() -> Result<(), GcalError> {
             app.handle_delete_event(&calendar_id, &event_id, &mut out).await?;
         }
 
-        Commands::Events { calendar, days, date, from, to, ids } => {
-            let calendar_id = resolve_calendar(&config_path, &calendar);
+        Commands::Events { calendar, calendars, days, date, from, to, ids } => {
+            let config = Config::load(&config_path).unwrap_or_default();
+            let calendar_ids = config.resolve_event_calendars(
+                calendar.as_deref(),
+                calendars.as_deref(),
+            );
             let today = Local::now().date_naive();
             let (time_min, time_max) = CliMapper::map_events_command(
                 date, from, to, days.map(|x| x as u64), today
@@ -153,7 +157,7 @@ async fn run() -> Result<(), GcalError> {
 
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_events(&calendar_id, time_min, time_max, ids, &mut out).await?;
+            app.handle_events(&calendar_ids, time_min, time_max, ids, &mut out).await?;
         }
     }
 
