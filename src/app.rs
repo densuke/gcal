@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 
 use crate::domain::{EventQuery, EventStart, NewEvent, UpdateEvent};
 use crate::error::GcalError;
@@ -73,23 +73,23 @@ impl<CAL: CalendarClient> App<CAL> {
             let events = self.calendar_client.list_events(query).await?;
             all_events.extend(events);
         }
-        all_events.sort_by_key(|e| event_start_as_utc(&e.start));
+        all_events.sort_by_key(|e| event_sort_key(&e.start));
         write_events(out, &all_events, show_ids)?;
         Ok(())
     }
 }
 
-/// EventStart をソートキー用の DateTime<Utc> に変換する。
-/// Date（終日イベント）は当日 00:00 UTC として扱う。
-fn event_start_as_utc(start: &EventStart) -> DateTime<Utc> {
+/// EventStart をソートキーに変換する。
+/// キー: (ローカル日付, 終日フラグ=0が先, ローカル時刻の秒数)
+/// 終日イベントは同じ日の時刻指定イベントより先に並ぶ。
+fn event_sort_key(start: &EventStart) -> (NaiveDate, u8, u32) {
     match start {
-        EventStart::DateTime(dt) => *dt,
-        EventStart::Date(d) => date_to_utc_midnight(*d),
+        EventStart::Date(d) => (*d, 0, 0),
+        EventStart::DateTime(dt) => {
+            let local = dt.with_timezone(&Local);
+            (local.date_naive(), 1, local.time().num_seconds_from_midnight())
+        }
     }
-}
-
-fn date_to_utc_midnight(d: NaiveDate) -> DateTime<Utc> {
-    d.and_hms_opt(0, 0, 0).unwrap().and_utc()
 }
 
 #[cfg(test)]
@@ -279,6 +279,31 @@ mod tests {
         app.handle_events(&ids, time_min(), time_max(), false, &mut out).await.unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("イベントが見つかりません"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_events_all_day_appears_before_timed_on_same_day() {
+        // 終日イベントは同じ日の時刻指定イベントより先に表示されること
+        // JST (UTC+9) では 08:00 JST = 前日 23:00 UTC になるため、
+        // UTC ソートだと終日イベントより前になってしまうバグの回帰テスト
+        use chrono::Local;
+        let local_08_00 = Local.with_ymd_and_hms(2026, 2, 25, 8, 0, 0).unwrap().with_timezone(&Utc);
+        let events = vec![
+            EventSummary { id: "t".into(), summary: "朝会".into(),
+                start: EventStart::DateTime(local_08_00) },
+            EventSummary { id: "d".into(), summary: "終日行事".into(),
+                start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap()) },
+        ];
+        let app = App {
+            calendar_client: FakeCalendarClient::new(vec![], events),
+        };
+        let mut out = Vec::new();
+        app.handle_events(&["primary".to_string()], time_min(), time_max(), false, &mut out).await.unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        let pos_allday = s.find("終日行事").unwrap();
+        let pos_timed  = s.find("朝会").unwrap();
+        assert!(pos_allday < pos_timed, "終日イベントが時刻指定イベントより後に出力された:\n{s}");
     }
 
     #[tokio::test]
