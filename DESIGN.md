@@ -431,7 +431,7 @@ default_calendars = ["仕事", "個人"]
 | `/users/me/calendarList` | GET | カレンダー一覧 |
 | `/calendars/{calendarId}/events` | GET | イベント一覧 |
 | `/calendars/{calendarId}/events` | POST | イベント作成 |
-| `/calendars/{calendarId}/events/{eventId}` | PUT | イベント更新 |
+| `/calendars/{calendarId}/events/{eventId}` | PATCH | イベント更新 |
 | `/calendars/{calendarId}/events/{eventId}` | DELETE | イベント削除 |
 
 ---
@@ -447,12 +447,18 @@ pub enum GcalError {
     OAuthStateMismatch,
     #[error("認証エラー: {0}")]
     AuthError(String),
-    #[error("API エラー: {0}")]
-    ApiError(String),
+    #[error("API エラー ({status}): {message}")]
+    ApiError { status: u16, message: String },
+    #[error("JSON パースエラー: {0}")]
+    JsonError(#[from] serde_json::Error),
     #[error("設定ファイルエラー: {0}")]
     ConfigError(String),
     #[error("IO エラー: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("コールバック待機タイムアウト")]
+    CallbackTimeout,
+    #[error("HTTP エラー: {0}")]
+    HttpError(#[from] reqwest::Error),
 }
 ```
 
@@ -505,7 +511,7 @@ xxxxxxxx@group.calendar.google.com   Work
 
 ## テスト方針
 
-### カバレッジ目標: 80%+（v0.6.1 実績: 239テスト）
+### カバレッジ目標: 80%+（fix/security-issues 実績: 297テスト）
 
 ### テストレイヤー
 
@@ -545,6 +551,8 @@ chrono = { version = "0.4", features = ["serde"] }
 iana-time-zone = "0.1"
 rpassword = "7"
 open = "5"
+percent-encoding = "2"
+url = "2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -636,6 +644,41 @@ fn pad_time_display(s: &str) -> String {
   終日   ノー残業デー   ← タイトル列が揃う
   08:00  ゴミ出し
 ```
+
+---
+
+## セキュリティ強化 (fix/security-issues)
+
+### 概要
+
+コードレビューで発見されたセキュリティ上の問題点を修正した。
+
+### 修正一覧
+
+| # | 対象ファイル | 問題 | 修正内容 |
+|---|------------|------|---------|
+| 1 | `config.rs` | 設定ファイルのパーミッション未設定 | `OpenOptions::mode(0o600)` で作成時から所有者のみ読み書き可に設定（TOCTOU 排除） |
+| 2 | `auth/callback.rs` | 独自 URL デコード実装のバグ | `percent-encoding` クレートに置換、UTF-8 マルチバイト文字を正しく処理 |
+| 3 | `auth/callback.rs` | OAuth コールバックのパス未検証 | `/callback` または `/` のみ受け入れ、不正パスはエラー |
+| 4 | `auth/provider.rs` | `token_endpoint` の URL 検証不備 | `url` クレートでホスト名を厳密にパース、`googleapis.com` 以外を拒否（バイパス攻撃対策） |
+| 5 | `ai/client.rs` | `base_url` のスキーム検証不備 | `https://` は全許可、`http://` はローカルホストのみ許可（外部 SSRF 対策） |
+| 6 | `config.rs` | `mask_string` が先頭・末尾4文字を露出 | 非空文字列は常に `"********"` で完全マスク |
+| 7 | `main.rs` | `gcal init` 時に Client ID を平文表示 | `"********"` に置換 |
+
+### `config.rs` — ファイルパーミッション
+
+Unix 環境では `OpenOptions` に `mode(0o600)` を指定し、ファイル作成の瞬間から
+所有者のみ読み書き可能なパーミッションを適用する。
+書き込み後に `set_permissions` を呼ぶ旧方式は TOCTOU（Time-of-Check to Time-of-Use）
+競合が生じるため採用しない。
+
+Windows 環境は `std::fs::write` にフォールバックする（OS 側のアクセス制御に依存）。
+
+### `auth/provider.rs` — token_endpoint ホワイトリスト
+
+`.contains(".googleapis.com")` による文字列マッチは
+`https://evil.com/.googleapis.com/token` のような URL でバイパスされるため、
+`url::Url::parse` でホスト名を厳密にパースした上で `ends_with(".googleapis.com")` で判定する。
 
 ---
 
