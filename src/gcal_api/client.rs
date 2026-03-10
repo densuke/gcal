@@ -143,7 +143,8 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                 None => None,
             };
 
-            events.push(EventSummary { id, summary, start, end });
+            let location = entry.location;
+            events.push(EventSummary { id, summary, start, end, location });
         }
 
         Ok(events)
@@ -434,6 +435,61 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].summary, "有効イベント");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_propagates_location() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{
+                    "id": "evt1",
+                    "summary": "会議",
+                    "start": { "dateTime": "2026-02-25T10:00:00Z" },
+                    "location": "会議室A"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let query = EventQuery {
+            calendar_id: "primary".to_string(),
+            time_min: Utc.with_ymd_and_hms(2026, 2, 24, 0, 0, 0).unwrap(),
+            time_max: Utc.with_ymd_and_hms(2026, 3, 3, 0, 0, 0).unwrap(),
+        };
+        let events = client.list_events(query).await.unwrap();
+
+        assert_eq!(events[0].location.as_deref(), Some("会議室A"));
+    }
+
+    #[tokio::test]
+    async fn test_list_events_location_is_none_when_absent() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{
+                    "id": "evt1",
+                    "summary": "会議",
+                    "start": { "dateTime": "2026-02-25T10:00:00Z" }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let query = EventQuery {
+            calendar_id: "primary".to_string(),
+            time_min: Utc.with_ymd_and_hms(2026, 2, 24, 0, 0, 0).unwrap(),
+            time_max: Utc.with_ymd_and_hms(2026, 3, 3, 0, 0, 0).unwrap(),
+        };
+        let events = client.list_events(query).await.unwrap();
+
+        assert_eq!(events[0].location, None);
     }
 
     // --- create_event のテスト ---

@@ -179,12 +179,14 @@ mod tests {
                 summary: "朝会".into(),
                 start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 2, 25, 0, 0, 0).unwrap()),
                 end: None,
+                location: None,
             },
             EventSummary {
                 id: "2".into(),
                 summary: "祝日".into(),
                 start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 26).unwrap()),
                 end: None,
+                location: None,
             },
         ];
 
@@ -233,13 +235,13 @@ mod tests {
         // 2カレンダーのイベントが時間順にマージされること
         let work_events = vec![
             EventSummary { id: "w1".into(), summary: "朝会".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 1, 0, 0).unwrap()), end: None },
+                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 1, 0, 0).unwrap()), end: None, location: None },
             EventSummary { id: "w2".into(), summary: "週次MTG".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 5, 0, 0).unwrap()), end: None },
+                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 5, 0, 0).unwrap()), end: None, location: None },
         ];
         let personal_events = vec![
             EventSummary { id: "p1".into(), summary: "ランチ".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 3, 0, 0).unwrap()), end: None },
+                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 3, 0, 0).unwrap()), end: None, location: None },
         ];
 
         let app = App {
@@ -292,9 +294,9 @@ mod tests {
         let local_08_00 = Local.with_ymd_and_hms(2026, 2, 25, 8, 0, 0).unwrap().with_timezone(&Utc);
         let events = vec![
             EventSummary { id: "t".into(), summary: "朝会".into(),
-                start: EventStart::DateTime(local_08_00), end: None },
+                start: EventStart::DateTime(local_08_00), end: None, location: None },
             EventSummary { id: "d".into(), summary: "終日行事".into(),
-                start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap()), end: None },
+                start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap()), end: None, location: None },
         ];
         let app = App {
             calendar_client: FakeCalendarClient::new(vec![], events),
