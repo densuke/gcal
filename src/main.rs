@@ -48,10 +48,10 @@ async fn run() -> Result<(), GcalError> {
     if let Some(os_config) = dirs::config_dir() {
         candidate_paths.push(("[OS-Spec] ".to_string(), os_config.join("gcal").join("config.toml")));
     }
-    // 4. カレントディレクトリ: ./.gcal.toml
-    candidate_paths.push(("[Current] ".to_string(), std::path::PathBuf::from(".gcal.toml")));
-
-    // 5. CLI引数で指定されたパス（あれば最強）
+    // 4. CLI引数で指定されたパス（あれば最強）
+    // NOTE: セキュリティ上の理由からカレントディレクトリ (./.gcal.toml) の自動探索は廃止。
+    // 信頼できないリポジトリ内でのSSRF / 設定シャドウイングを防ぐため、
+    // 設定ファイルを明示指定したい場合は --config フラグを使用してください。
     if let Some(ref path) = cli.config {
         candidate_paths.push(("[Explicit]".to_string(), path.clone()));
     }

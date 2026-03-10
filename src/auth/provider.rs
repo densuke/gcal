@@ -135,10 +135,12 @@ impl<S: TokenStore, C: Clock> TokenProvider for RefreshingTokenProvider<S, C> {
             .ok_or(GcalError::NotInitialized)?;
 
         // 有効期限のチェック（30秒のバッファを持たせる）
+        // expires_at が None（有効期限不明）の場合はリフレッシュを試みる。
+        // 不明なままトークンを使い続けると失効時に復帰不能になるため。
         let needs_refresh = tokens
             .expires_at
             .map(|exp| exp - chrono::Duration::seconds(30) <= self.clock.now())
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         if needs_refresh {
             let refresh_token = tokens
@@ -310,6 +312,60 @@ mod tests {
         let saved = store.load_tokens().unwrap().unwrap();
         // 古い refresh_token が引き継がれること
         assert_eq!(saved.refresh_token.as_deref(), Some("keep_this_refresh"));
+    }
+
+    #[tokio::test]
+    async fn test_refreshes_when_expires_at_is_none() {
+        // expires_at が None の場合、リフレッシュトークンがあれば必ずリフレッシュを試みる
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("grant_type=refresh_token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "refreshed_token",
+                "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+
+        let store = InMemoryTokenStore::new(Some(StoredTokens {
+            access_token: "maybe_stale_token".to_string(),
+            refresh_token: Some("refresh_token".to_string()),
+            expires_at: None, // 有効期限不明
+        }));
+
+        let provider = RefreshingTokenProvider::with_token_endpoint(
+            store.clone(),
+            FixedClock(now()),
+            "cid".to_string(),
+            "csecret".to_string(),
+            format!("{}/token", server.uri()),
+        );
+
+        let token = provider.access_token().await.unwrap();
+        // 有効期限不明でもリフレッシュされ、新しいトークンが返る
+        assert_eq!(token, "refreshed_token");
+    }
+
+    #[tokio::test]
+    async fn test_returns_error_when_expires_at_none_and_no_refresh_token() {
+        // expires_at が None かつ refresh_token もない場合はエラー
+        let store = InMemoryTokenStore::new(Some(StoredTokens {
+            access_token: "maybe_stale_token".to_string(),
+            refresh_token: None,
+            expires_at: None,
+        }));
+
+        let provider = RefreshingTokenProvider::new(
+            store,
+            FixedClock(now()),
+            "cid".to_string(),
+            "csecret".to_string(),
+        );
+
+        let result = provider.access_token().await;
+        assert!(matches!(result, Err(GcalError::AuthError(_))));
     }
 
     #[test]

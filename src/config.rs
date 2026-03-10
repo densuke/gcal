@@ -151,10 +151,27 @@ impl Config {
     }
 
     /// 設定ファイルを読み込む
+    /// Unix系では、パーミッションが 0600 または 0400 でない場合はエラーを返す。
+    /// 秘密情報（トークン・クライアントシークレット）の漏洩を防ぐため。
     pub fn load(path: &Path) -> Result<Self, GcalError> {
         if !path.exists() {
             return Err(GcalError::NotInitialized);
         }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = std::fs::metadata(path)
+                .map_err(|e| GcalError::ConfigError(format!("メタデータ取得エラー: {e}")))?;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o600 && mode != 0o400 {
+                return Err(GcalError::ConfigError(format!(
+                    "設定ファイルのパーミッションが不正です: {path:?} (現在: 0{mode:o}, 必要: 0600 または 0400)\n\
+                    修正方法: chmod 600 {path:?}",
+                )));
+            }
+        }
+
         let content = std::fs::read_to_string(path)
             .map_err(|e| GcalError::ConfigError(format!("読み込みエラー: {e}")))?;
         toml::from_str(&content)
@@ -296,6 +313,26 @@ mod tests {
         dir.path().join("gcal").join("config.toml")
     }
 
+    /// テスト用: TOML 文字列を 0600 パーミッションで書き込むヘルパー
+    fn write_test_config(path: &std::path::Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true).write(true).truncate(true).mode(0o600)
+                .open(path).unwrap();
+            f.write_all(content.as_bytes()).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(path, content).unwrap();
+        }
+    }
+
     // --- AiConfig のデフォルト値テスト ---
 
     #[test]
@@ -318,11 +355,7 @@ mod tests {
         // v0.4.0 以前の設定ファイル（[ai] セクションなし）を読んでもデフォルト値が入る
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
-        )
-        .unwrap();
+        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
         let config = Config::load(&path).unwrap();
         assert_eq!(config.ai.base_url, "http://localhost:11434");
         assert_eq!(config.ai.model, "gemma3:4b");
@@ -369,6 +402,47 @@ mod tests {
         config.save(&path).unwrap();
 
         assert!(path.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rejects_insecure_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // 0644 で書き込んだファイルはロードを拒否する
+        std::fs::write(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let result = Config::load(&path);
+        assert!(result.is_err(), "0644 のファイルはエラーになるべき");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("パーミッションが不正"), "エラーメッセージに「パーミッションが不正」が含まれるべき: {msg}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_accepts_0600_permissions() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        write_test_config(&path, "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n");
+        // 0600 で書かれたファイルは正常にロードできる
+        assert!(Config::load(&path).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_accepts_0400_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        write_test_config(&path, "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o400)).unwrap();
+        // 0400（読み取り専用）も許可
+        assert!(Config::load(&path).is_ok());
     }
 
     #[test]
@@ -486,11 +560,7 @@ mod tests {
         // v0.5.x 以前の設定ファイル（[calendars] セクションなし）でも空 HashMap になる
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
-        )
-        .unwrap();
+        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
         let config = Config::load(&path).unwrap();
         assert!(config.calendars.is_empty());
     }
@@ -520,7 +590,7 @@ mod tests {
         // [events] セクションなしの旧設定ファイルでも空になる（後方互換）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n").unwrap();
+        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
         let config = Config::load(&path).unwrap();
         assert!(config.events.default_calendars.is_empty());
     }
