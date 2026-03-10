@@ -75,6 +75,36 @@ impl Default for AiConfig {
 }
 
 impl Config {
+    /// 他の設定内容で自身を上書き（マージ）する
+    pub fn merge(&mut self, other: Config) {
+        if !other.credentials.client_id.is_empty() {
+            self.credentials.client_id = other.credentials.client_id;
+        }
+        if !other.credentials.client_secret.is_empty() {
+            self.credentials.client_secret = other.credentials.client_secret;
+        }
+        if other.token.is_some() {
+            self.token = other.token;
+        }
+        if !other.ai.base_url.is_empty() && other.ai.base_url != DEFAULT_AI_BASE_URL {
+            self.ai.base_url = other.ai.base_url;
+        }
+        if !other.ai.model.is_empty() && other.ai.model != DEFAULT_AI_MODEL {
+            self.ai.model = other.ai.model;
+        }
+        // AI enabled は明示的に設定されている場合のみ（デフォルトが true なので判定が難しいが、
+        // Deserialize の仕組み上、常に値が入るため、実用的にはそのまま上書きでも良い）
+        self.ai.enabled = other.ai.enabled;
+
+        // エイリアスは追加・上書き
+        self.calendars.extend(other.calendars);
+
+        // Events 設定
+        if !other.events.default_calendars.is_empty() {
+            self.events.default_calendars = other.events.default_calendars;
+        }
+    }
+
     /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
     /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
     pub fn resolve_calendar_id(&self, input: &str) -> String {

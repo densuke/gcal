@@ -28,32 +28,77 @@ async fn main() {
 async fn run() -> Result<(), GcalError> {
     let cli = Cli::parse();
     let mut load_info = Vec::new();
+    let mut config = Config::default();
 
-    let config_path = if let Some(path) = cli.config.clone() {
-        load_info.push(format!("1. [Explicit] 指定された設定ファイル: {:?}", path));
-        path
-    } else {
-        let default = Config::default_path()?;
-        load_info.push(format!("1. [Default]  デフォルトの設定ファイル: {:?}", default));
-        default
-    };
+    // 読み込み候補パスのリスト（優先度の低い順 = 後のファイルが上書きする）
+    let mut candidate_paths = Vec::new();
+
+    // 1. ホームディレクトリ直下: ~/.gcal.toml
+    if let Some(home) = dirs::home_dir() {
+        candidate_paths.push((format!("[Home]    "), home.join(".gcal.toml")));
+    }
+    // 2. XDG準拠: ~/.config/gcal/config.toml
+    if let Some(home) = dirs::home_dir() {
+        candidate_paths.push((format!("[XDG]     "), home.join(".config").join("gcal").join("config.toml")));
+    }
+    // 3. OS依存の標準の場所: (macOSなら ~/Library/Application Support/gcal/config.toml)
+    if let Some(os_config) = dirs::config_dir() {
+        candidate_paths.push((format!("[OS-Spec] "), os_config.join("gcal").join("config.toml")));
+    }
+    // 4. カレントディレクトリ: ./.gcal.toml
+    candidate_paths.push((format!("[Current] "), std::path::PathBuf::from(".gcal.toml")));
+
+    // 5. CLI引数で指定されたパス（あれば最強）
+    if let Some(ref path) = cli.config {
+        candidate_paths.push((format!("[Explicit]"), path.clone()));
+    }
+
+    // 重複するパスを除去（OS-Spec と XDG が同じ場合があるため）
+    let mut seen = std::collections::HashSet::new();
+    let unique_candidates: Vec<_> = candidate_paths
+        .into_iter()
+        .filter(|(_, p)| seen.insert(p.clone()))
+        .collect();
+
+    // ファイルを順に読み込んでマージ
+    let mut last_loaded_path = None;
+    let mut priority = 1;
+    for (label, path) in unique_candidates {
+        if path.exists() {
+            match Config::load(&path) {
+                Ok(other) => {
+                    config.merge(other);
+                    load_info.push(format!("{}. {} {:?} (読み込み完了/上書き)", priority, label, path));
+                    last_loaded_path = Some(path.clone());
+                    priority += 1;
+                }
+                Err(e) => {
+                    load_info.push(format!("{}. {} {:?} (エラー: {})", priority, label, path, e));
+                    priority += 1;
+                }
+            }
+        } else if cli.verbose || cli.show_config {
+            // --verbose か --show-config の時は「存在しなかった」ことも出すと親切
+            load_info.push(format!("{}. {} {:?} (存在しません)", priority, label, path));
+            priority += 1;
+        }
+    }
+
+    // 最後に書き込み等で使う「メインのパス」を決定
+    // CLI引数 > 最後に読み込んだパス > デフォルトパス
+    let config_path = cli.config.clone()
+        .or(last_loaded_path)
+        .unwrap_or_else(|| Config::default_path().unwrap_or_else(|_| std::path::PathBuf::from("config.toml")));
 
     if cli.verbose || cli.show_config {
         for info in &load_info {
             eprintln!("Info: {}", info);
         }
+        eprintln!("Info: 最終的な設定ファイル (保存先): {:?}", config_path);
     }
 
     if cli.show_config {
-        match Config::load(&config_path) {
-            Ok(config) => {
-                println!("\n{}", config.display_config());
-            }
-            Err(e) => {
-                eprintln!("Warning: 設定ファイルを読み込めませんでした: {e}");
-                println!("\n--- Current Configuration ---\n  (Using Defaults)\n------------------------------");
-            }
-        }
+        println!("\n{}", config.display_config());
         return Ok(());
     }
 
