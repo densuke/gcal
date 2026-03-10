@@ -1,8 +1,16 @@
+use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
 
 use crate::ai::types::{AiEventParameters, AiOperationIntent};
 use crate::error::GcalError;
+
+/// AI クライアントの抽象トレイト。テスト時にスタブを注入できる。
+#[async_trait]
+pub trait AiClient: Send + Sync {
+    async fn parse_prompt(&self, user_prompt: &str) -> Result<AiEventParameters, GcalError>;
+    async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError>;
+}
 
 pub struct OllamaClient {
     http: Client,
@@ -165,6 +173,17 @@ Output: {"operation":"update","target":{"title_hint":"朝会","date_hint":"明�
             .ok_or_else(|| GcalError::ApiError { status: 500, message: "Ollamaのアウトプットからcontentが見つかりません".to_string() })?;
 
         serde_json::from_str(content_str).map_err(GcalError::JsonError)
+    }
+}
+
+#[async_trait]
+impl AiClient for OllamaClient {
+    async fn parse_prompt(&self, user_prompt: &str) -> Result<AiEventParameters, GcalError> {
+        OllamaClient::parse_prompt(self, user_prompt).await
+    }
+
+    async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError> {
+        OllamaClient::parse_operation_intent(self, user_prompt).await
     }
 }
 
