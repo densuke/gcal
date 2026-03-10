@@ -13,6 +13,7 @@ pub struct AddCommandInput {
     pub start: Option<String>,
     pub end: Option<String>,
     pub calendar: String,
+    pub calendar_display_name: String,
     pub location: Option<String>,
     pub recurrence: crate::cli::RecurrenceArgs,
     pub reminder_args: crate::cli::ReminderArgs,
@@ -28,6 +29,7 @@ impl Default for AddCommandInput {
             start: None,
             end: None,
             calendar: "primary".to_string(),
+            calendar_display_name: "primary".to_string(),
             location: None,
             recurrence: Default::default(),
             reminder_args: Default::default(),
@@ -40,6 +42,7 @@ impl Default for AddCommandInput {
 pub struct UpdateCommandInput {
     pub event_id: String,
     pub calendar: String,
+    pub calendar_display_name: String,
     pub title: Option<String>,
     pub date: Option<String>,
     pub start: Option<String>,
@@ -59,6 +62,7 @@ impl Default for UpdateCommandInput {
         Self {
             event_id: "".to_string(),
             calendar: "primary".to_string(),
+            calendar_display_name: "primary".to_string(),
             title: None,
             date: None,
             start: None,
@@ -85,6 +89,7 @@ impl CliMapper {
             start,
             end,
             calendar,
+            calendar_display_name,
             location,
             recurrence,
             reminder_args,
@@ -145,6 +150,7 @@ impl CliMapper {
         Ok(NewEvent {
             summary: effective_title,
             calendar_id: calendar,
+            calendar_display_name: Some(calendar_display_name),
             start: start_dt,
             end: end_dt,
             recurrence: recurrence_payload,
@@ -157,6 +163,7 @@ impl CliMapper {
         let UpdateCommandInput {
             event_id,
             calendar,
+            calendar_display_name,
             title,
             date,
             start,
@@ -255,6 +262,7 @@ impl CliMapper {
         Ok(UpdateEvent {
             event_id,
             calendar_id: calendar,
+            calendar_display_name: Some(calendar_display_name),
             title: effective_title,
             start: start_dt,
             end: end_dt,

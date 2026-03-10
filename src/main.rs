@@ -71,16 +71,11 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
+            let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_add_command(AddCommandInput {
-                title, date, start, end, calendar: calendar_id, location, recurrence, reminder_args, today, ai_params
+                title, date, start, end, calendar: calendar_id, calendar_display_name, location, recurrence, reminder_args, today, ai_params
             })?;
-            if ai_args.dry_run {
-                let mut out = std::io::stdout();
-                write_new_event_dry_run(&event, &mut out)?;
-                return Ok(());
-            }
             // AI 使用時は登録内容を表示して確認を求める（--yes でスキップ）
             if used_ai && !ai_args.yes {
                 let mut out = std::io::stdout();
@@ -98,16 +93,11 @@ async fn run() -> Result<(), GcalError> {
             let today = Local::now().date_naive();
             let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
-            let calendar_id = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
+            let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_update_command(UpdateCommandInput {
-                event_id, calendar: calendar_id, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
+                event_id, calendar: calendar_id, calendar_display_name, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
             })?;
-            if ai_args.dry_run {
-                let mut out = std::io::stdout();
-                write_update_event_dry_run(&event, &mut out)?;
-                return Ok(());
-            }
             // AI 使用時は更新内容を表示して確認を求める（--yes でスキップ）
             if used_ai && !ai_args.yes {
                 let mut out = std::io::stdout();
@@ -122,7 +112,7 @@ async fn run() -> Result<(), GcalError> {
         }
 
         Commands::Delete { event_id, force, calendar } => {
-            let calendar_id = resolve_calendar(&config_path, &calendar);
+            let (calendar_id, _) = resolve_calendar(&config_path, &calendar);
             if !force {
                 if !confirm_or_cancel(&format!(
                     "イベント (ID: {}) を削除しますか? [y/N]: ",
@@ -162,27 +152,23 @@ fn resolve_calendar_from_args(
     config_path: &std::path::Path,
     calendar: Option<String>,
     ai_params: Option<&AiEventParameters>,
-) -> String {
+) -> (String, String) {
     let raw = calendar
         .or_else(|| ai_params.and_then(|p| p.calendar.clone()))
         .unwrap_or_else(|| "primary".to_string());
     resolve_calendar(config_path, &raw)
 }
 
-/// カレンダーエイリアスを Google カレンダー ID に解決する。
-/// エイリアス一覧に存在しない場合は入力をそのまま返す。
-/// ただしエイリアスが1件以上設定されていて、かつ入力が "@" を含まず
-/// "primary" でもない場合は警告を stderr に出力して "primary" を返す。
-fn resolve_calendar(config_path: &std::path::Path, input: &str) -> String {
+fn resolve_calendar(config_path: &std::path::Path, input: &str) -> (String, String) {
     let config = Config::load(config_path).unwrap_or_default();
     let resolved = config.resolve_calendar_id(input);
     if resolved == input && !input.contains('@') && input != "primary" && !config.calendars.is_empty() {
         // TODO: 将来的には「unknown alias → 作成後に別カレンダーへ移動」機能を追加
         eprintln!("警告: 未知のカレンダーエイリアス '{}' → primary を使用します", input);
         eprintln!("      `gcal calendars aliases` でエイリアス一覧を確認できます");
-        return "primary".to_string();
+        return ("primary".to_string(), "primary".to_string());
     }
-    resolved
+    (resolved, input.to_string())
 }
 
 /// API クライアントと App を組み立てる
