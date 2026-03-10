@@ -205,6 +205,8 @@ gcal/
     ├── domain.rs             # データ構造体（CalendarSummary, EventSummary, NewEvent 等）
     ├── ports.rs              # テスト可能にするためのトレイト群
     ├── config.rs             # 設定ファイルの読み書き（TokenStore 実装含む）
+    ├── event_selector.rs     # 自然文ターゲットに基づくイベント絞り込みロジック
+    ├── prompt_flow.rs        # events -p 時のイベント取得・候補提示・入力受付フロー
     ├── output.rs             # 表示フォーマット（純粋関数）
     ├── error.rs              # thiserror でエラー型定義
     ├── ai/
@@ -906,7 +908,7 @@ pub struct AiEventTarget {
 システムプロンプト（第1段階）:
 ```
 操作種別と対象イベントのヒントを JSON で返す。
-{ "operation": "add"|"update"|"delete",
+{ "operation": "add"|"update"|"delete"|"show",
   "target": { "title_hint": "...", "date_hint": "...", "calendar": "..." } | null }
 add の場合 target は null でよい。
 ```
