@@ -1,7 +1,9 @@
 pub mod ai;
 pub mod alias_handler;
 pub mod app;
+pub mod event_selector;
 pub mod parser;
+pub mod prompt_flow;
 pub mod auth;
 pub mod cli;
 pub mod cli_mapper;

@@ -247,6 +247,7 @@ mod tests {
             summary: summary.to_string(),
             start: EventStart::DateTime(dt),
             end: None,
+            location: None,
         }
     }
 
@@ -257,6 +258,7 @@ mod tests {
             summary: summary.to_string(),
             start: EventStart::Date(date),
             end: None,
+            location: None,
         }
     }
 

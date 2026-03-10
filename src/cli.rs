@@ -56,8 +56,11 @@ pub struct ReminderArgs {
 /// AI・実行制御フラグ（Add / Update で共通）
 #[derive(Args, Debug, Default)]
 pub struct AiArgs {
-    /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
-    #[arg(long)]
+    /// 自然言語プロンプト（--ai の後継）
+    #[arg(short = 'p', long, conflicts_with = "ai")]
+    pub prompt: Option<String>,
+    /// 自然言語プロンプト（後方互換、--prompt と排他）
+    #[arg(long, conflicts_with = "prompt")]
     pub ai: Option<String>,
     /// AI サーバーのベースURL（設定をオーバーライド）
     #[arg(long)]
@@ -68,7 +71,7 @@ pub struct AiArgs {
     /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
     #[arg(long)]
     pub dry_run: bool,
-    /// --ai 使用時の確認プロンプトをスキップして即時実行
+    /// --prompt/--ai 使用時の確認プロンプトをスキップして即時実行
     #[arg(short = 'y', long)]
     pub yes: bool,
 }
@@ -86,30 +89,43 @@ pub enum Commands {
         #[command(subcommand)]
         sub: Option<CalendarSubcommands>,
     },
-    /// 直近のイベントを表示
+    /// 直近のイベントを表示、または -p で CRUD 操作を自然言語で実行
     Events {
         /// 対象カレンダーの ID またはエイリアス（--calendars と排他）
-        #[arg(long, conflicts_with = "calendars")]
+        #[arg(long, conflicts_with_all = ["calendars", "prompt"])]
         calendar: Option<String>,
         /// カンマ区切りで複数カレンダーを指定（--calendar と排他）
         /// 例: --calendars 仕事,個人
-        #[arg(long, conflicts_with = "calendar")]
+        #[arg(long, conflicts_with_all = ["calendar", "prompt"])]
         calendars: Option<String>,
-        /// 取得する日数（--date / --from / --to と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "from", "to"])]
+        /// 取得する日数（--date / --from / --to / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "from", "to", "prompt"])]
         days: Option<u64>,
         /// イベント ID を表示する
-        #[arg(long)]
+        #[arg(long, conflicts_with = "prompt")]
         ids: bool,
-        /// 日付・期間を自然言語で指定（--days / --from / --to と同時指定不可）
-        #[arg(long, conflicts_with_all = ["days", "from", "to"])]
+        /// 日付・期間を自然言語で指定（--days / --from / --to / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["days", "from", "to", "prompt"])]
         date: Option<String>,
-        /// 開始日を自然言語で指定（--date / --days と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "days"])]
+        /// 開始日を自然言語で指定（--date / --days / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "days", "prompt"])]
         from: Option<String>,
-        /// 終了日を自然言語で指定（--date / --days と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "days"])]
+        /// 終了日を自然言語で指定（--date / --days / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "days", "prompt"])]
         to: Option<String>,
+        /// 自然言語で CRUD 操作を実行（他の表示系オプションと排他）
+        #[arg(short = 'p', long,
+              conflicts_with_all = ["calendar", "calendars", "days", "ids", "date", "from", "to"])]
+        prompt: Option<String>,
+        /// AI サーバーの URL（--prompt 使用時のオーバーライド）
+        #[arg(long, requires = "prompt")]
+        ai_url: Option<String>,
+        /// AI モデル名（--prompt 使用時のオーバーライド）
+        #[arg(long, requires = "prompt")]
+        ai_model: Option<String>,
+        /// 確認プロンプトをスキップ（--prompt 使用時）
+        #[arg(short = 'y', long, requires = "prompt")]
+        yes: bool,
     },
     /// 既存の予定を更新（--title / --start・--end / --date のうち少なくとも1つ必須）
     Update {
@@ -151,9 +167,17 @@ pub enum Commands {
         ai_args: AiArgs,
     },
     /// 既存の予定を削除
+    #[command(group = clap::ArgGroup::new("target").required(true).args(["event_id", "prompt", "ai"]))]
     Delete {
-        /// イベント ID
-        event_id: String,
+        /// イベント ID（--prompt/--ai と排他、どちらか必須）
+        #[arg(group = "target")]
+        event_id: Option<String>,
+        /// 自然言語でイベントを特定して削除
+        #[arg(short = 'p', long, group = "target")]
+        prompt: Option<String>,
+        /// 自然言語プロンプト（後方互換、--prompt と排他）
+        #[arg(long, conflicts_with = "prompt", group = "target")]
+        ai: Option<String>,
         /// 確認をスキップして削除
         #[arg(short = 'f', long)]
         force: bool,
@@ -300,6 +324,55 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_add_prompt_short_flag() {
+        let cli = Cli::try_parse_from(["gcal", "add", "-p", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("明日の会議"));
+            assert_eq!(ai_args.ai, None);
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_prompt_long_flag() {
+        let cli = Cli::try_parse_from(["gcal", "add", "--prompt", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("明日の会議"));
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_prompt_and_ai_are_exclusive() {
+        let result = Cli::try_parse_from(["gcal", "add", "--prompt", "test", "--ai", "test"]);
+        assert!(result.is_err(), "--prompt と --ai は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_update_prompt_flag() {
+        let cli = Cli::try_parse_from(["gcal", "update", "evt_id", "-p", "場所を変更"]).unwrap();
+        if let Commands::Update { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("場所を変更"));
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_ai_still_works_for_compat() {
+        // --ai は後方互換のため引き続き動作すること
+        let cli = Cli::try_parse_from(["gcal", "add", "--ai", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.ai.as_deref(), Some("明日の会議"));
+            assert_eq!(ai_args.prompt, None);
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
     fn test_cli_delete_force() {
         let cli = Cli::try_parse_from(["gcal", "delete", "evt_id", "-f"]).unwrap();
         if let Commands::Delete { force, calendar, .. } = cli.command {
@@ -308,6 +381,63 @@ mod tests {
         } else {
             panic!("Expected Delete command");
         }
+    }
+
+    #[test]
+    fn test_cli_delete_by_id() {
+        let cli = Cli::try_parse_from(["gcal", "delete", "evt_abc123"]).unwrap();
+        if let Commands::Delete { event_id, prompt, .. } = cli.command {
+            assert_eq!(event_id, Some("evt_abc123".to_string()));
+            assert_eq!(prompt, None);
+        } else {
+            panic!("Expected Delete command");
+        }
+    }
+
+    #[test]
+    fn test_cli_delete_by_prompt() {
+        let cli = Cli::try_parse_from(["gcal", "delete", "-p", "明日の会議を削除"]).unwrap();
+        if let Commands::Delete { event_id, prompt, .. } = cli.command {
+            assert_eq!(event_id, None);
+            assert_eq!(prompt.as_deref(), Some("明日の会議を削除"));
+        } else {
+            panic!("Expected Delete command");
+        }
+    }
+
+    #[test]
+    fn test_cli_delete_requires_id_or_prompt() {
+        // どちらも指定しない場合はエラー
+        let result = Cli::try_parse_from(["gcal", "delete"]);
+        assert!(result.is_err(), "event_id か --prompt のどちらかが必須のはず");
+    }
+
+    #[test]
+    fn test_cli_delete_id_and_prompt_are_exclusive() {
+        let result = Cli::try_parse_from(["gcal", "delete", "evt_id", "-p", "会議を削除"]);
+        assert!(result.is_err(), "event_id と --prompt は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_events_prompt_flag() {
+        let cli = Cli::try_parse_from(["gcal", "events", "-p", "明日の会議を削除して"]).unwrap();
+        if let Commands::Events { prompt, .. } = cli.command {
+            assert_eq!(prompt.as_deref(), Some("明日の会議を削除して"));
+        } else {
+            panic!("Expected Events command");
+        }
+    }
+
+    #[test]
+    fn test_cli_events_prompt_conflicts_with_date() {
+        let result = Cli::try_parse_from(["gcal", "events", "-p", "test", "--date", "今日"]);
+        assert!(result.is_err(), "--prompt と --date は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_events_prompt_conflicts_with_days() {
+        let result = Cli::try_parse_from(["gcal", "events", "-p", "test", "--days", "7"]);
+        assert!(result.is_err(), "--prompt と --days は排他のはず");
     }
 
     #[test]

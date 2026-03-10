@@ -791,6 +791,7 @@ CRUD 操作すべてを自然言語で実行できるようにする。
 | 更新 | `gcal update <id> --ai "<prompt>"` | `gcal update <id> -p "<prompt>"` |
 | 削除 | `gcal delete <id>` (LLM なし) | `gcal delete -p "<prompt>"` (ID 省略可) |
 | 統合 | なし | `gcal events -p "<prompt>"` (操作種別も LLM が判断) |
+| 表示 | `gcal events [--date/--from/--to]` | `gcal events -p "来週の予定を見せて"` (日付範囲も自然文) |
 
 ---
 
@@ -885,9 +886,9 @@ Events {
 ```rust
 #[derive(Debug, Deserialize)]
 pub struct AiOperationIntent {
-    /// "add" | "update" | "delete"
+    /// "add" | "update" | "delete" | "show"
     pub operation: String,
-    /// update/delete 時のイベント特定ヒント
+    /// update/delete/show 時のイベント特定・絞り込みヒント
     pub target: Option<AiEventTarget>,
 }
 

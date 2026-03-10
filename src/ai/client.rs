@@ -1,8 +1,16 @@
+use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
 
-use crate::ai::types::AiEventParameters;
+use crate::ai::types::{AiEventParameters, AiOperationIntent};
 use crate::error::GcalError;
+
+/// AI クライアントの抽象トレイト。テスト時にスタブを注入できる。
+#[async_trait]
+pub trait AiClient: Send + Sync {
+    async fn parse_prompt(&self, user_prompt: &str) -> Result<AiEventParameters, GcalError>;
+    async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError>;
+}
 
 pub struct OllamaClient {
     http: Client,
@@ -98,6 +106,93 @@ Output: {"title":"定例会議(役員限定)","date":"3/1","start":"10:00","end"
             .map_err(|e| GcalError::JsonError(e))?;
 
         Ok(params)
+    }
+
+    /// gcal events -p の第1段階: 操作種別とイベント特定ヒントを抽出する
+    pub async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError> {
+        let url = format!("{}/api/chat", self.base_url);
+
+        let system_prompt = r#"
+You are a Google Calendar operation classifier.
+Determine the operation type and extract hints to identify the target event or date range.
+Output ONLY a valid JSON object. No explanation, no markdown.
+
+Schema:
+{
+  "operation": "add" | "update" | "delete" | "show",
+  "target": {
+    "title_hint": "<keywords from event title or null>",
+    "date_hint": "<date expression as-is or null>",
+    "calendar": "<calendar alias or null>"
+  } | null
+}
+
+Rules:
+- "add": creating a new event. "target" is null.
+- "update": changing an existing event. "target" has title_hint and/or date_hint.
+- "delete": removing an existing event. "target" has title_hint and/or date_hint.
+- "show": viewing/listing events (e.g. "見せて", "確認", "表示", "show", "list"). "target" has date_hint (and optionally title_hint/calendar).
+- "title_hint": extract the event name keywords. Keep it concise. null if not applicable.
+- "date_hint": preserve the original date expression (e.g., "明日", "来週", "来週火曜", "3/15", "今週"). null if not specified.
+- "calendar": extract only if explicitly mentioned, otherwise null.
+
+Examples:
+Input: "明日の14時から会議を追加して"
+Output: {"operation":"add","target":null}
+
+Input: "来週火曜の定例MTGを削除して"
+Output: {"operation":"delete","target":{"title_hint":"定例MTG","date_hint":"来週火曜","calendar":null}}
+
+Input: "明日の仕事の朝会を15時に変更して"
+Output: {"operation":"update","target":{"title_hint":"朝会","date_hint":"明日","calendar":"仕事"}}
+
+Input: "来週の予定を見せて"
+Output: {"operation":"show","target":{"title_hint":null,"date_hint":"来週","calendar":null}}
+
+Input: "今日の仕事のカレンダーを確認したい"
+Output: {"operation":"show","target":{"title_hint":null,"date_hint":"今日","calendar":"仕事"}}
+"#;
+
+        let payload = json!({
+            "model": self.model,
+            "messages": [
+                { "role": "system", "content": system_prompt.trim() },
+                { "role": "user", "content": user_prompt }
+            ],
+            "format": "json",
+            "stream": false,
+            "options": { "temperature": 0.0 }
+        });
+
+        let res = self.http.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(GcalError::HttpError)?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(GcalError::ApiError { status: status.as_u16(), message: format!("Ollama APIエラー: {}", body) });
+        }
+
+        let resp_json: serde_json::Value = res.json().await.map_err(GcalError::HttpError)?;
+
+        let content_str = resp_json["message"]["content"].as_str()
+            .ok_or_else(|| GcalError::ApiError { status: 500, message: "Ollamaのアウトプットからcontentが見つかりません".to_string() })?;
+
+        serde_json::from_str(content_str).map_err(GcalError::JsonError)
+    }
+}
+
+#[async_trait]
+impl AiClient for OllamaClient {
+    async fn parse_prompt(&self, user_prompt: &str) -> Result<AiEventParameters, GcalError> {
+        OllamaClient::parse_prompt(self, user_prompt).await
+    }
+
+    async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError> {
+        OllamaClient::parse_operation_intent(self, user_prompt).await
     }
 }
 
@@ -199,5 +294,66 @@ mod tests {
         let result = client.parse_prompt("test").await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), GcalError::ApiError { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_parse_operation_intent_add() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": {
+                    "content": r#"{"operation":"add","target":null}"#
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let intent = client.parse_operation_intent("明日の14時から会議を追加して").await.unwrap();
+        assert_eq!(intent.operation, "add");
+        assert!(intent.target.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_operation_intent_delete_with_target() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": {
+                    "content": r#"{"operation":"delete","target":{"title_hint":"定例MTG","date_hint":"来週火曜","calendar":null}}"#
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let intent = client.parse_operation_intent("来週火曜の定例MTGを削除して").await.unwrap();
+        assert_eq!(intent.operation, "delete");
+        let target = intent.target.unwrap();
+        assert_eq!(target.title_hint.as_deref(), Some("定例MTG"));
+        assert_eq!(target.date_hint.as_deref(), Some("来週火曜"));
+        assert_eq!(target.calendar, None);
+    }
+
+    #[tokio::test]
+    async fn test_parse_operation_intent_update_with_calendar() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": {
+                    "content": r#"{"operation":"update","target":{"title_hint":"朝会","date_hint":"明日","calendar":"仕事"}}"#
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = make_client(&server.uri());
+        let intent = client.parse_operation_intent("明日の仕事の朝会を変更して").await.unwrap();
+        assert_eq!(intent.operation, "update");
+        let target = intent.target.unwrap();
+        assert_eq!(target.calendar.as_deref(), Some("仕事"));
     }
 }

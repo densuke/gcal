@@ -16,6 +16,7 @@ pub struct EventSummary {
     pub summary: String,
     pub start: EventStart,
     pub end: Option<EventStart>,
+    pub location: Option<String>,
 }
 
 /// イベント開始日時（終日イベントは date のみ、時刻指定は date_time）
