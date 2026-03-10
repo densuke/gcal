@@ -566,6 +566,7 @@ dependencies = [
  "iana-time-zone",
  "oauth2",
  "open",
+ "percent-encoding",
  "predicates",
  "reqwest 0.12.28",
  "rpassword",
@@ -575,6 +576,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "url",
  "wiremock",
 ]
 

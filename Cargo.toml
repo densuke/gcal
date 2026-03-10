@@ -52,6 +52,10 @@ rpassword = "7"
 # ブラウザを開く
 open = "5"
 
+# URLデコード・パース
+percent-encoding = "2"
+url = "2"
+
 [dev-dependencies]
 # CLI 統合テスト
 assert_cmd = "2"

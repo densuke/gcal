@@ -162,6 +162,7 @@ impl Config {
     }
 
     /// 設定ファイルに書き込む（親ディレクトリがなければ作成）
+    /// Unix 系ではファイル作成時から 0600（所有者のみ読み書き）を設定し TOCTOU を防ぐ。
     pub fn save(&self, path: &Path) -> Result<(), GcalError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -169,8 +170,29 @@ impl Config {
         }
         let content = toml::to_string_pretty(self)
             .map_err(|e| GcalError::ConfigError(format!("シリアライズエラー: {e}")))?;
-        std::fs::write(path, content)
-            .map_err(|e| GcalError::ConfigError(format!("書き込みエラー: {e}")))
+
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600) // 作成の瞬間から 0600 に設定
+                .open(path)
+                .map_err(|e| GcalError::ConfigError(format!("ファイルオープンエラー: {e}")))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| GcalError::ConfigError(format!("書き込みエラー: {e}")))?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            std::fs::write(path, &content)
+                .map_err(|e| GcalError::ConfigError(format!("書き込みエラー: {e}")))?;
+        }
+
+        Ok(())
     }
 
     /// 設定内容を表示用にフォーマットする (機密情報はマスクされる)
@@ -347,6 +369,22 @@ mod tests {
         config.save(&path).unwrap();
 
         assert!(path.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_save_sets_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = temp_config_path(&dir);
+
+        let config = Config::default();
+        config.save(&path).unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "ファイルパーミッションは 0600 であるべき: {mode:o}");
     }
 
     #[test]

@@ -8,6 +8,34 @@ use crate::ports::{Clock, TokenProvider, TokenStore};
 /// Google のトークンリフレッシュエンドポイント
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 
+/// token_endpoint の URL を検証する。
+/// - https:// かつホスト名が googleapis.com または *.googleapis.com のみ本番許可
+/// - テスト用に http://127.0.0.1 / http://localhost も許可する
+///
+/// 文字列のプレフィックス/contains では "evil.com/.googleapis.com" のような
+/// バイパスが可能なため、url クレートでホスト名を厳密にパースして確認する。
+fn validate_token_endpoint(url_str: &str) -> Result<(), GcalError> {
+    let parsed = url::Url::parse(url_str)
+        .map_err(|_| GcalError::AuthError(format!("不正な token_endpoint URL: '{url_str}'")))?;
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| GcalError::AuthError(format!("token_endpoint にホストがありません: '{url_str}'")))?;
+
+    if parsed.scheme() == "https"
+        && (host == "googleapis.com" || host.ends_with(".googleapis.com"))
+    {
+        return Ok(());
+    }
+    if parsed.scheme() == "http" && (host == "127.0.0.1" || host == "localhost") {
+        return Ok(());
+    }
+    Err(GcalError::AuthError(format!(
+        "不正な token_endpoint: '{url_str}' \
+        (https://*.googleapis.com または http://127.0.0.1 のみ許可)"
+    )))
+}
+
 /// access_token の有効期限が切れていたら自動的に refresh するプロバイダー
 pub struct RefreshingTokenProvider<S: TokenStore, C: Clock> {
     store: S,
@@ -50,6 +78,11 @@ impl<S: TokenStore, C: Clock> RefreshingTokenProvider<S, C> {
     }
 
     async fn refresh(&self, refresh_token: &str) -> Result<StoredTokens, GcalError> {
+        // token_endpoint は https:// かつ googleapis.com ドメインのみ許可
+        // テスト時は with_token_endpoint() でモックサーバーを使うため
+        // http://127.0.0.1 も許可する
+        validate_token_endpoint(&self.token_endpoint)?;
+
         let params = [
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
@@ -277,5 +310,35 @@ mod tests {
         let saved = store.load_tokens().unwrap().unwrap();
         // 古い refresh_token が引き継がれること
         assert_eq!(saved.refresh_token.as_deref(), Some("keep_this_refresh"));
+    }
+
+    #[test]
+    fn test_validate_token_endpoint_allows_googleapis() {
+        assert!(validate_token_endpoint("https://oauth2.googleapis.com/token").is_ok());
+        assert!(validate_token_endpoint("https://accounts.googleapis.com/token").is_ok());
+    }
+
+    #[test]
+    fn test_validate_token_endpoint_allows_loopback_for_tests() {
+        assert!(validate_token_endpoint("http://127.0.0.1:8080/token").is_ok());
+        assert!(validate_token_endpoint("http://localhost:9000/token").is_ok());
+    }
+
+    #[test]
+    fn test_validate_token_endpoint_rejects_arbitrary_https() {
+        assert!(validate_token_endpoint("https://evil.example.com/token").is_err());
+    }
+
+    #[test]
+    fn test_validate_token_endpoint_rejects_http_external() {
+        assert!(validate_token_endpoint("http://evil.example.com/token").is_err());
+    }
+
+    #[test]
+    fn test_validate_token_endpoint_rejects_contains_bypass() {
+        // .contains(".googleapis.com") を使った場合にバイパスされるパターンを拒否すること
+        assert!(validate_token_endpoint("https://evil.com/.googleapis.com/token").is_err());
+        assert!(validate_token_endpoint("https://oauth2.googleapis.com.evil.jp/token").is_err());
+        assert!(validate_token_endpoint("https://fake.googleapis.com.example.com/token").is_err());
     }
 }

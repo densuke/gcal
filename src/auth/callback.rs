@@ -2,6 +2,8 @@ use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
 
+use percent_encoding::percent_decode_str;
+
 use crate::domain::OAuthCallback;
 use crate::error::GcalError;
 use crate::ports::AuthCodeReceiver;
@@ -80,10 +82,17 @@ fn parse_callback_from_request_line(line: &str) -> Result<OAuthCallback, GcalErr
     }
 
     let path_and_query = parts[1];
-    let query_str = path_and_query
-        .split_once('?')
-        .map(|(_, q)| q)
-        .unwrap_or("");
+
+    // パスが /callback または / で始まることを検証する
+    let (path, query_str) = match path_and_query.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (path_and_query, ""),
+    };
+    if path != "/callback" && path != "/" {
+        return Err(GcalError::AuthError(format!(
+            "無効なコールバックパス: {path}"
+        )));
+    }
 
     parse_callback_from_query(query_str)
 }
@@ -95,8 +104,8 @@ fn parse_callback_from_query(query_str: &str) -> Result<OAuthCallback, GcalError
     for param in query_str.split('&') {
         if let Some((key, value)) = param.split_once('=') {
             match key {
-                "code" => code = Some(url_decode(value)),
-                "state" => state = Some(url_decode(value)),
+                "code" => code = Some(url_decode(value)?),
+                "state" => state = Some(url_decode(value)?),
                 "error" => {
                     return Err(GcalError::AuthError(format!("OAuth エラー: {value}")));
                 }
@@ -113,24 +122,14 @@ fn parse_callback_from_query(query_str: &str) -> Result<OAuthCallback, GcalError
     }
 }
 
-/// 簡易 URL デコード（%XX を文字に変換）
-fn url_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next().unwrap_or('0');
-            let h2 = chars.next().unwrap_or('0');
-            if let Ok(byte) = u8::from_str_radix(&format!("{h1}{h2}"), 16) {
-                result.push(byte as char);
-            }
-        } else if c == '+' {
-            result.push(' ');
-        } else {
-            result.push(c);
-        }
-    }
-    result
+/// URL デコード（percent-encoding クレートを使用）
+fn url_decode(s: &str) -> Result<String, GcalError> {
+    // '+' をスペースに変換してから percent_decode する
+    let plus_replaced = s.replace('+', " ");
+    percent_decode_str(&plus_replaced)
+        .decode_utf8()
+        .map(|cow| cow.into_owned())
+        .map_err(|e| GcalError::AuthError(format!("URLデコードエラー: {e}")))
 }
 
 /// 手動入力でコールバック URL を受け取る（SSH 環境向けフォールバック）
@@ -224,9 +223,9 @@ mod tests {
 
     #[test]
     fn test_url_decode_percent_encoding() {
-        assert_eq!(url_decode("hello%20world"), "hello world");
-        assert_eq!(url_decode("a+b"), "a b");
-        assert_eq!(url_decode("plain"), "plain");
+        assert_eq!(url_decode("hello%20world").unwrap(), "hello world");
+        assert_eq!(url_decode("a+b").unwrap(), "a b");
+        assert_eq!(url_decode("plain").unwrap(), "plain");
     }
 
     #[test]
@@ -269,6 +268,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_callback_from_request_line_wrong_path_returns_error() {
+        // /callback 以外のパスはエラーになること
+        let line = "GET /evil?code=x&state=y HTTP/1.1\r\n";
+        let result = parse_callback_from_request_line(line);
+        assert!(matches!(result, Err(GcalError::AuthError(_))));
+    }
+
+    #[test]
+    fn test_parse_callback_from_request_line_root_path_ok() {
+        // / パスも許容する（一部OAuthサーバーのリダイレクトで使われる）
+        let line = "GET /?code=root_code&state=root_state HTTP/1.1\r\n";
+        let cb = parse_callback_from_request_line(line).unwrap();
+        assert_eq!(cb.code, "root_code");
+        assert_eq!(cb.state, "root_state");
+    }
+
+    #[test]
     fn test_parse_callback_from_query_ignores_unknown_params() {
         // 不明なパラメータは無視され、code と state だけ取れること
         let cb = parse_callback_from_query("code=abc&state=xyz&extra=ignored").unwrap();
@@ -278,8 +294,10 @@ mod tests {
 
     #[test]
     fn test_url_decode_invalid_percent_encoding() {
-        // 無効な16進数（%ZZ）はスキップされる
+        // percent-encoding クレートは無効な %XX シーケンス（16進数でないもの）を
+        // そのままリテラルとして通過させる（エラーにならない）
         let result = url_decode("val%ZZue");
-        assert_eq!(result, "value");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "val%ZZue");
     }
 }

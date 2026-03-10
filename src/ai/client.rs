@@ -5,6 +5,38 @@ use serde_json::json;
 use crate::ai::types::{AiEventParameters, AiOperationIntent};
 use crate::error::GcalError;
 
+/// AI クライアントの base_url を検証する。
+/// - https:// は全ホスト許可（Ollama クラウドホスティング等に対応）
+/// - http:// は localhost / 127.0.0.1 のみ許可（SSRF対策でローカル専用）
+/// - file:// 等の危険なスキームや空文字は拒否する
+///
+/// url クレートでホスト名を厳密にパースし、プレフィックス判定のバイパスを防ぐ。
+fn validate_base_url(url_str: &str) -> Result<(), GcalError> {
+    let url_str = url_str.trim();
+    if url_str.is_empty() {
+        return Err(GcalError::ConfigError("AI base_url が空です".to_string()));
+    }
+    let parsed = url::Url::parse(url_str)
+        .map_err(|_| GcalError::ConfigError(format!("不正な AI base_url: '{url_str}'")))?;
+
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let host = parsed.host_str().unwrap_or("");
+            if host == "localhost" || host == "127.0.0.1" {
+                Ok(())
+            } else {
+                Err(GcalError::ConfigError(format!(
+                    "http:// は localhost / 127.0.0.1 のみ許可されています: '{url_str}'"
+                )))
+            }
+        }
+        _ => Err(GcalError::ConfigError(format!(
+            "不正な AI base_url スキーム: '{url_str}' (https:// または http://localhost のみ許可)"
+        ))),
+    }
+}
+
 /// AI クライアントの抽象トレイト。テスト時にスタブを注入できる。
 #[async_trait]
 pub trait AiClient: Send + Sync {
@@ -28,6 +60,7 @@ impl OllamaClient {
     }
 
     pub async fn parse_prompt(&self, user_prompt: &str) -> Result<AiEventParameters, GcalError> {
+        validate_base_url(&self.base_url)?;
         let url = format!("{}/api/chat", self.base_url);
 
         let system_prompt = r#"
@@ -110,6 +143,7 @@ Output: {"title":"定例会議(役員限定)","date":"3/1","start":"10:00","end"
 
     /// gcal events -p の第1段階: 操作種別とイベント特定ヒントを抽出する
     pub async fn parse_operation_intent(&self, user_prompt: &str) -> Result<AiOperationIntent, GcalError> {
+        validate_base_url(&self.base_url)?;
         let url = format!("{}/api/chat", self.base_url);
 
         let system_prompt = r#"
@@ -355,5 +389,42 @@ mod tests {
         assert_eq!(intent.operation, "update");
         let target = intent.target.unwrap();
         assert_eq!(target.calendar.as_deref(), Some("仕事"));
+    }
+
+    #[test]
+    fn test_validate_base_url_allows_https_any_host() {
+        assert!(validate_base_url("https://ollama.example.com").is_ok());
+        assert!(validate_base_url("https://cloud-ollama.corp.internal").is_ok());
+    }
+
+    #[test]
+    fn test_validate_base_url_allows_http_localhost_only() {
+        assert!(validate_base_url("http://localhost:11434").is_ok());
+        assert!(validate_base_url("http://127.0.0.1:11434").is_ok());
+    }
+
+    #[test]
+    fn test_validate_base_url_rejects_http_external() {
+        // http:// は外部ホストへのSSRFを防ぐため拒否
+        assert!(validate_base_url("http://192.168.1.100:11434").is_err());
+        assert!(validate_base_url("http://evil.example.com").is_err());
+    }
+
+    #[test]
+    fn test_validate_base_url_rejects_file_scheme() {
+        assert!(validate_base_url("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_base_url_rejects_empty() {
+        assert!(validate_base_url("").is_err());
+        assert!(validate_base_url("   ").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_parse_prompt_rejects_invalid_base_url() {
+        let client = OllamaClient::new("file:///etc/passwd".to_string(), "model".to_string());
+        let result = client.parse_prompt("テスト").await;
+        assert!(matches!(result, Err(GcalError::ConfigError(_))));
     }
 }
