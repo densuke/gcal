@@ -149,6 +149,15 @@ pub enum Commands {
         #[arg(long, default_value = "primary")]
         calendar: String,
     },
+    /// シェル補完スクリプトを標準出力に出力する
+    ///
+    /// 使い方: eval "$(gcal shell bash)" を ~/.bashrc に追加
+    #[command(name = "shell")]
+    Shell {
+        /// 対象シェル (bash または zsh)
+        #[arg(value_parser = ["bash", "zsh"])]
+        shell: String,
+    },
     /// Google Calendar に予定を登録
     Add {
         /// 予定名（--ai を指定する場合は省略可）

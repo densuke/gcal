@@ -1,5 +1,6 @@
 use chrono::Local;
 use clap::Parser;
+use clap_complete::{generate, Shell};
 
 use gcal::ai::client::OllamaClient;
 use gcal::ai::types::AiEventParameters;
@@ -140,6 +141,17 @@ async fn run() -> Result<(), GcalError> {
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
             app.handle_events(&calendar_ids, time_min, time_max, ids, &mut out).await?;
+        }
+
+        Commands::Shell { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let mut out = std::io::stdout();
+            match shell.as_str() {
+                "bash" => generate(Shell::Bash, &mut cmd, "gcal", &mut out),
+                "zsh" => generate(Shell::Zsh, &mut cmd, "gcal", &mut out),
+                _ => unreachable!(),
+            }
         }
     }
 
