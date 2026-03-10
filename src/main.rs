@@ -221,6 +221,22 @@ async fn dispatch_prompt_events(
             app.handle_add_event(event, &mut out).await?;
         }
 
+        "show" => {
+            let target = intent.target.unwrap_or(AiEventTarget {
+                title_hint: None,
+                date_hint: None,
+                calendar: None,
+            });
+            let config = Config::load(config_path).unwrap_or_default();
+            let calendar_ids = config.resolve_event_calendars(
+                calendar.as_deref(),
+                calendars.as_deref(),
+            );
+            let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
+            let app = build_app(config_path)?;
+            app.handle_events(&calendar_ids, time_min, time_max, false, &mut out).await?;
+        }
+
         op @ ("delete" | "update") => {
             let target = intent.target.unwrap_or(AiEventTarget {
                 title_hint: None,

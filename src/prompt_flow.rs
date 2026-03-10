@@ -12,10 +12,10 @@ use crate::config::Config;
 use crate::domain::{EventQuery, EventStart, EventSummary};
 use crate::error::GcalError;
 use crate::event_selector;
-use crate::output::{write_new_event_dry_run, write_update_event_dry_run};
+use crate::output::{write_events, write_new_event_dry_run, write_update_event_dry_run};
 use crate::parser::parse_date_expr;
 use crate::ports::CalendarClient;
-use chrono::{Duration, Local};
+use chrono::{Duration, Local, Timelike};
 
 /// events -p / delete -p の共通 "操作種別判定 → イベント特定" ワークフロー。
 /// `main.rs` は依存の組み立てだけを担い、ロジック本体はここに集約する。
@@ -137,9 +137,38 @@ where
             writeln!(out, "更新しました (ID: {})", selected.id)?;
         }
 
+        "show" => {
+            let target = intent.target.unwrap_or(AiEventTarget {
+                title_hint: None,
+                date_hint: None,
+                calendar: None,
+            });
+            let calendar_ids = config.resolve_event_calendars(None, None);
+            let (time_min, time_max) = search_range(target.date_hint.as_deref(), today)?;
+            let mut all_events: Vec<EventSummary> =
+                fetch_events(client, &calendar_ids, time_min, time_max)
+                    .await?
+                    .into_iter()
+                    .map(|(_, e)| e)
+                    .collect();
+            // title_hint がある場合はさらに絞り込む
+            if target.title_hint.is_some() {
+                let matched = event_selector::filter_by_target(&all_events, &target, today);
+                all_events = matched.into_iter().map(|i| all_events[i].clone()).collect();
+            }
+            all_events.sort_by_key(|e| match &e.start {
+                EventStart::Date(d) => (*d, 0u8, 0u32),
+                EventStart::DateTime(dt) => {
+                    let local = dt.with_timezone(&Local);
+                    (local.date_naive(), 1, local.time().num_seconds_from_midnight())
+                }
+            });
+            write_events(out, &all_events, false)?;
+        }
+
         other => {
             return Err(GcalError::ConfigError(format!(
-                "不明な操作種別: '{}' (add/update/delete のいずれかが必要)",
+                "不明な操作種別: '{}' (add/update/delete/show のいずれかが必要)",
                 other
             )));
         }
@@ -569,5 +598,89 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "primary");
         assert_eq!(result[0].1.id, "e1");
+    }
+
+    // --- show 操作のテスト ---
+
+    fn show_intent(date: &str) -> AiOperationIntent {
+        AiOperationIntent {
+            operation: "show".to_string(),
+            target: Some(AiEventTarget {
+                title_hint: None,
+                date_hint: Some(date.to_string()),
+                calendar: None,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_prompt_events_show_displays_events() {
+        let d = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+        let fake = FakeCalendarClient::new(vec![
+            make_event("e1", "朝会", d),
+            make_event("e2", "ランチ", d),
+        ]);
+        let ai = StubAiClient {
+            intent: show_intent("2026/3/10"),
+            params: AiEventParameters::default(),
+        };
+
+        let mut out = Vec::new();
+        dispatch_prompt_events(
+            &fake, &ai, &config_with_primary(), today(),
+            "今日の予定を見せて", true, &mut out,
+        ).await.unwrap();
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("朝会"), "output: {output}");
+        assert!(output.contains("ランチ"), "output: {output}");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_prompt_events_show_no_events_shows_empty_message() {
+        let fake = FakeCalendarClient::new(vec![]);
+        let ai = StubAiClient {
+            intent: show_intent("2026/3/10"),
+            params: AiEventParameters::default(),
+        };
+
+        let mut out = Vec::new();
+        dispatch_prompt_events(
+            &fake, &ai, &config_with_primary(), today(),
+            "今日の予定を見せて", true, &mut out,
+        ).await.unwrap();
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("イベントが見つかりません"), "output: {output}");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_prompt_events_show_with_title_hint_filters() {
+        let d = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+        let fake = FakeCalendarClient::new(vec![
+            make_event("e1", "定例MTG", d),
+            make_event("e2", "ランチ", d),
+        ]);
+        let ai = StubAiClient {
+            intent: AiOperationIntent {
+                operation: "show".to_string(),
+                target: Some(AiEventTarget {
+                    title_hint: Some("MTG".to_string()),
+                    date_hint: Some("2026/3/10".to_string()),
+                    calendar: None,
+                }),
+            },
+            params: AiEventParameters::default(),
+        };
+
+        let mut out = Vec::new();
+        dispatch_prompt_events(
+            &fake, &ai, &config_with_primary(), today(),
+            "今日のMTGを見せて", true, &mut out,
+        ).await.unwrap();
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("定例MTG"), "output: {output}");
+        assert!(!output.contains("ランチ"), "ランチが表示されるべきでない: {output}");
     }
 }
