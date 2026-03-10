@@ -234,10 +234,10 @@ impl Config {
 }
 
 fn mask_string(s: &str) -> String {
-    if s.len() <= 8 {
-        "********".to_string()
+    if s.is_empty() {
+        "(未設定)".to_string()
     } else {
-        format!("{}********{}", &s[..4], &s[s.len() - 4..])
+        "********".to_string()
     }
 }
 
@@ -626,6 +626,62 @@ mod tests {
         assert_eq!(default_ai_base_url(), DEFAULT_AI_BASE_URL);
         assert_eq!(default_ai_model(), DEFAULT_AI_MODEL);
         assert!(default_ai_enabled());
+    }
+
+    // --- mask_string のテスト ---
+
+    #[test]
+    fn test_mask_string_non_empty_returns_stars() {
+        // 長短に関わらず常に "********" を返す
+        assert_eq!(mask_string("short"), "********");
+        assert_eq!(mask_string("a_very_long_secret_value_12345678"), "********");
+        assert_eq!(mask_string("12345678"), "********");
+    }
+
+    #[test]
+    fn test_mask_string_empty_returns_unset() {
+        assert_eq!(mask_string(""), "(未設定)");
+    }
+
+    // --- display_config のテスト ---
+
+    #[test]
+    fn test_display_config_masks_credentials() {
+        let config = Config {
+            credentials: Credentials {
+                client_id: "my_client_id_xyz".to_string(),
+                client_secret: "super_secret_abc".to_string(),
+            },
+            token: None,
+            ai: AiConfig::default(),
+            calendars: Default::default(),
+            events: Default::default(),
+        };
+        let output = config.display_config();
+        // 実際の値が出力に含まれないこと
+        assert!(!output.contains("my_client_id_xyz"), "client_id が露出している");
+        assert!(!output.contains("super_secret_abc"), "client_secret が露出している");
+        // マスク文字列が含まれること
+        assert!(output.contains("********"));
+    }
+
+    #[test]
+    fn test_display_config_masks_tokens() {
+        use chrono::Utc;
+        let config = Config {
+            credentials: Credentials::default(),
+            token: Some(crate::config::TokenSection {
+                access_token: "access_tok_secret".to_string(),
+                refresh_token: Some("refresh_tok_secret".to_string()),
+                expires_at: Some(Utc::now()),
+            }),
+            ai: AiConfig::default(),
+            calendars: Default::default(),
+            events: Default::default(),
+        };
+        let output = config.display_config();
+        assert!(!output.contains("access_tok_secret"), "access_token が露出している");
+        assert!(!output.contains("refresh_tok_secret"), "refresh_token が露出している");
     }
 }
 

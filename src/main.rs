@@ -504,7 +504,7 @@ fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String)
     if let Ok(config) = Config::load(config_path) {
         if !config.credentials.client_id.is_empty() {
             println!("既存の認証情報が見つかりました:");
-            println!("  Client ID: {}", config.credentials.client_id);
+            println!("  Client ID: ********");
             let answer = prompt("既存の認証情報を使いますか? [Y/n]: ")?;
             if answer.is_empty() || answer.to_lowercase() == "y" {
                 return Ok((config.credentials.client_id, config.credentials.client_secret));
