@@ -15,6 +15,7 @@ pub struct EventSummary {
     pub id: String,
     pub summary: String,
     pub start: EventStart,
+    pub end: Option<EventStart>,
 }
 
 /// イベント開始日時（終日イベントは date のみ、時刻指定は date_time）
@@ -52,6 +53,7 @@ pub struct OAuthCallback {
 pub struct NewEvent {
     pub summary: String,
     pub calendar_id: String,
+    pub calendar_display_name: Option<String>,
     pub start: DateTime<Local>,
     pub end: DateTime<Local>,
     pub recurrence: Option<Vec<String>>,
@@ -64,6 +66,7 @@ pub struct NewEvent {
 pub struct UpdateEvent {
     pub event_id: String,
     pub calendar_id: String,
+    pub calendar_display_name: Option<String>,
     pub title: Option<String>,
     pub start: Option<DateTime<Local>>,
     pub end: Option<DateTime<Local>>,

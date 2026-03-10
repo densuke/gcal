@@ -125,7 +125,25 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                 None => continue,
             };
 
-            events.push(EventSummary { id, summary, start });
+            let end = match entry.end {
+                Some(e) => {
+                    if let Some(dt_str) = e.date_time {
+                        let dt = chrono::DateTime::parse_from_rfc3339(&dt_str)
+                            .map_err(|e| GcalError::ConfigError(format!("日時パースエラー: {e}")))?
+                            .with_timezone(&chrono::Utc);
+                        Some(EventStart::DateTime(dt))
+                    } else if let Some(d_str) = e.date {
+                        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d")
+                            .map_err(|e| GcalError::ConfigError(format!("日付パースエラー: {e}")))?;
+                        Some(EventStart::Date(d))
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            };
+
+            events.push(EventSummary { id, summary, start, end });
         }
 
         Ok(events)
@@ -442,6 +460,7 @@ mod tests {
         let event = NewEvent {
             summary: "テスト会議".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             start,
             end,
             recurrence: None,
@@ -472,6 +491,7 @@ mod tests {
         let event = NewEvent {
             summary: "テスト".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             start,
             end,
             recurrence: None,
@@ -502,6 +522,7 @@ mod tests {
         let event = NewEvent {
             summary: "テスト".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             start,
             end,
             recurrence: None,
@@ -532,6 +553,7 @@ mod tests {
         let event = UpdateEvent {
             event_id: "event-id-123".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             title: Some("新しいタイトル".to_string()),
             start: None,
             end: None,
@@ -562,6 +584,7 @@ mod tests {
         let event = UpdateEvent {
             event_id: "event-id-456".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             title: None,
             start: Some(start),
             end: Some(end),
@@ -588,6 +611,7 @@ mod tests {
         let event = UpdateEvent {
             event_id: "no-such-event".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             title: Some("test".to_string()),
             start: None,
             end: None,

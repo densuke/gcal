@@ -41,6 +41,7 @@ pub struct EventEntry {
     pub summary: Option<String>,
     pub location: Option<String>,
     pub start: Option<EventStartTime>,
+    pub end: Option<EventStartTime>,
 }
 
 #[derive(Debug, Deserialize)]

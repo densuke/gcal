@@ -26,20 +26,51 @@ pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> 
 
 /// イベント一覧を日付ごとにグループ化して書き出す
 ///
-/// `show_ids` が true のとき、各行の末尾にイベント ID を表示する
+/// `show_ids` が true のとき、各行の末尾にイベント ID を表示する。
+/// 本日のイベント一覧の場合、現在時刻マーカーと進行中イベントマーカーを表示する。
 pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bool) -> Result<(), GcalError> {
     if events.is_empty() {
         writeln!(out, "イベントが見つかりません")?;
         return Ok(());
     }
 
+    let now: DateTime<Local> = Local::now();
+    let today = now.date_naive();
+
+    // 本日に進行中のイベントがあるか先に確認（あれば現在時刻マーカーは表示しない）
+    let any_running_today = events.iter().any(|e| {
+        if let EventStart::DateTime(start_dt) = &e.start {
+            let start_local: DateTime<Local> = DateTime::from(*start_dt);
+            if start_local.date_naive() == today {
+                if let Some(EventStart::DateTime(end_dt)) = &e.end {
+                    let end_local: DateTime<Local> = DateTime::from(*end_dt);
+                    return start_local <= now && now < end_local;
+                }
+            }
+        }
+        false
+    });
+
     let mut current_date: Option<NaiveDate> = None;
+    let mut current_time_marker_shown = false;
 
     for event in events {
         let (date, time_str) = match &event.start {
             EventStart::DateTime(dt) => {
-                let local: DateTime<Local> = DateTime::from(*dt);
-                (local.date_naive(), local.format("%H:%M").to_string())
+                let start_local: DateTime<Local> = DateTime::from(*dt);
+                let end_str = event.end.as_ref().and_then(|e| match e {
+                    EventStart::DateTime(edt) => {
+                        let end_local: DateTime<Local> = DateTime::from(*edt);
+                        Some(end_local.format("%H:%M").to_string())
+                    }
+                    _ => None,
+                });
+                let time_str = if let Some(end) = end_str {
+                    format!("{}-{}", start_local.format("%H:%M"), end)
+                } else {
+                    start_local.format("%H:%M").to_string()
+                };
+                (start_local.date_naive(), time_str)
             }
             EventStart::Date(d) => (*d, "終日".to_string()),
         };
@@ -50,12 +81,38 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
             }
             writeln!(out, "{}", format_date(date))?;
             current_date = Some(date);
+            current_time_marker_shown = false;
         }
 
-        if show_ids {
-            writeln!(out, "  {}  {:<40}  [{}]", pad_time_display(&time_str), event.summary, event.id)?;
+        // 進行中のイベントがない場合のみ、最初の未来イベントの前に現在時刻マーカーを挿入
+        if date == today && !current_time_marker_shown && !any_running_today {
+            if let EventStart::DateTime(dt) = &event.start {
+                let start_local: DateTime<Local> = DateTime::from(*dt);
+                if start_local > now {
+                    writeln!(out, "  —— 現在 ({}) ——", now.format("%H:%M"))?;
+                    current_time_marker_shown = true;
+                }
+            }
+        }
+
+        // 現在進行中かどうか判定
+        let is_running = if let EventStart::DateTime(dt) = &event.start {
+            let start_local: DateTime<Local> = DateTime::from(*dt);
+            if let Some(EventStart::DateTime(end_dt)) = &event.end {
+                let end_local: DateTime<Local> = DateTime::from(*end_dt);
+                start_local <= now && now < end_local
+            } else {
+                false
+            }
         } else {
-            writeln!(out, "  {}  {}", pad_time_display(&time_str), event.summary)?;
+            false
+        };
+
+        let prefix = if is_running { "> " } else { "  " };
+        if show_ids {
+            writeln!(out, "{}{}  {:<40}  [{}]", prefix, pad_time_display(&time_str), event.summary, event.id)?;
+        } else {
+            writeln!(out, "{}{}  {}", prefix, pad_time_display(&time_str), event.summary)?;
         }
     }
 
@@ -74,7 +131,8 @@ pub fn write_new_event_dry_run<W: Write>(event: &NewEvent, out: &mut W) -> Resul
         Some(rules) => writeln!(out, "  繰り返し:   {}", rules.join(", "))?,
     }
     writeln!(out, "  通知:       {}", format_reminders(&event.reminders))?;
-    writeln!(out, "  カレンダー: {}", event.calendar_id)?;
+    let cal_display = event.calendar_display_name.as_ref().unwrap_or(&event.calendar_id);
+    writeln!(out, "  カレンダー: {}", cal_display)?;
     Ok(())
 }
 
@@ -95,7 +153,8 @@ pub fn write_update_event_dry_run<W: Write>(event: &UpdateEvent, out: &mut W) ->
         Some(r) => format_reminders(&Some(r.clone())),
     };
     writeln!(out, "  通知:       {}", reminders_str)?;
-    writeln!(out, "  カレンダー: {}", event.calendar_id)?;
+    let cal_display = event.calendar_display_name.as_ref().unwrap_or(&event.calendar_id);
+    writeln!(out, "  カレンダー: {}", cal_display)?;
     Ok(())
 }
 
@@ -146,10 +205,10 @@ fn char_display_width(c: char) -> usize {
     }
 }
 
-/// 時刻文字列をターミナル表示幅 5 になるようにスペースでパディングする。
-/// "08:00" (5) → "08:00", "終日" (4) → "終日 "
+/// 時刻文字列をターミナル表示幅 11 になるようにスペースでパディングする。
+/// "10:00-14:30" (11) → "10:00-14:30", "終日" (4) → "終日       "
 fn pad_time_display(s: &str) -> String {
-    const TARGET: usize = 5;
+    const TARGET: usize = 11;
     let width: usize = s.chars().map(char_display_width).sum();
     let padding = TARGET.saturating_sub(width);
     format!("{}{}", s, " ".repeat(padding))
@@ -187,6 +246,7 @@ mod tests {
             id: id.to_string(),
             summary: summary.to_string(),
             start: EventStart::DateTime(dt),
+            end: None,
         }
     }
 
@@ -196,6 +256,7 @@ mod tests {
             id: id.to_string(),
             summary: summary.to_string(),
             start: EventStart::Date(date),
+            end: None,
         }
     }
 
@@ -317,35 +378,33 @@ mod tests {
     // --- pad_time_display のテスト ---
 
     #[test]
-    fn test_pad_time_display_ascii_5chars_no_padding() {
-        assert_eq!(pad_time_display("08:00"), "08:00");
+    fn test_pad_time_display_range_11chars_no_padding() {
+        // "10:00-14:30" は11文字 → パディングなし
+        assert_eq!(pad_time_display("10:00-14:30"), "10:00-14:30");
     }
 
     #[test]
-    fn test_pad_time_display_ascii_4chars_pads_1() {
-        assert_eq!(pad_time_display("9:00"), "9:00 ");
+    fn test_pad_time_display_ascii_5chars_pads_6() {
+        // "08:00" は5文字 → 表示幅11に合わせて6スペース補完
+        assert_eq!(pad_time_display("08:00"), "08:00      ");
     }
 
     #[test]
-    fn test_pad_time_display_allday_kanji_pads_1() {
-        // "終日" は2全角文字 → 表示幅4 → パディング1スペース
-        assert_eq!(pad_time_display("終日"), "終日 ");
+    fn test_pad_time_display_allday_kanji_pads_7() {
+        // "終日" は2全角文字 → 表示幅4 → 7スペースでパディング
+        assert_eq!(pad_time_display("終日"), "終日       ");
     }
 
     #[test]
-    fn test_write_events_allday_no_extra_padding() {
-        // 終日予定の行で "終日" の後にスペースが多すぎないことを確認
-        // 旧バグ: {:5} で文字数5にパディング → "終日   " (3スペース) + 区切り2スペース = 5スペース
-        // 修正後: 表示幅5にパディング → "終日 " (1スペース) + 区切り2スペース = 3スペース
+    fn test_write_events_allday_padding_consistent() {
+        // 終日予定の行で "終日" が表示幅11にパディングされることを確認
         let events = vec![make_event_allday("1", "祝日", 2026, 2, 24)];
         let mut out = Vec::new();
         write_events(&mut out, &events, false).unwrap();
         let s = String::from_utf8(out).unwrap();
         let allday_line = s.lines().find(|l| l.contains("祝日")).unwrap();
-        // 修正後: "終日" の後ろは3スペース (パディング1 + 区切り2)
-        assert!(allday_line.contains("終日   "), "パディングが正しくない: {:?}", allday_line);
-        // 旧バグがないことを確認: 4スペース以上は NG
-        assert!(!allday_line.contains("終日    "), "過剰パディングがある: {:?}", allday_line);
+        // "終日" (表示幅4) → 7スペースパディング → + 区切り2スペース = 合計9スペース
+        assert!(allday_line.contains("終日         "), "パディングが正しくない: {:?}", allday_line);
     }
 
     #[test]
@@ -371,6 +430,7 @@ mod tests {
         NewEvent {
             summary: "チームMTG".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             start: local_dt(2026, 3, 20, 14, 0),
             end: local_dt(2026, 3, 20, 15, 0),
             recurrence: None,
@@ -542,6 +602,7 @@ mod tests {
         UpdateEvent {
             event_id: "evt_123".to_string(),
             calendar_id: "primary".to_string(),
+            calendar_display_name: None,
             title: Some("新タイトル".to_string()),
             start: Some(local_dt(2026, 3, 20, 14, 0)),
             end: Some(local_dt(2026, 3, 20, 15, 0)),
