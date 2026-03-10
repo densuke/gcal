@@ -192,7 +192,7 @@ where
 }
 
 /// date_hint から検索時間範囲を計算する。
-fn search_range(
+pub fn search_range(
     date_hint: Option<&str>,
     today: NaiveDate,
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), GcalError> {

@@ -1,4 +1,4 @@
-use chrono::{Duration, Local};
+use chrono::Local;
 use clap::Parser;
 use clap_complete::{generate, Shell};
 
@@ -11,14 +11,14 @@ use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{CalendarSubcommands, Cli, Commands};
-use gcal::cli_mapper::{AddCommandInput, UpdateCommandInput, CliMapper, naive_date_to_utc_start, naive_date_to_utc_end};
+use gcal::cli_mapper::{AddCommandInput, UpdateCommandInput, CliMapper};
 use gcal::config::{AiConfig, Config, FileTokenStore};
-use gcal::domain::{EventQuery, EventStart, EventSummary};
+use gcal::domain::EventSummary;
 use gcal::error::GcalError;
 use gcal::event_selector;
 use gcal::gcal_api::client::GoogleCalendarClient;
-use gcal::parser::parse_date_expr;
-use gcal::ports::{CalendarClient, SystemBrowserOpener, SystemClock};
+use gcal::ports::{SystemBrowserOpener, SystemClock};
+use gcal::prompt_flow;
 
 #[tokio::main]
 async fn main() {
@@ -180,6 +180,7 @@ async fn run() -> Result<(), GcalError> {
 
 /// events -p ディスパッチモードのエントリポイント。
 /// LLM で操作種別（add/update/delete）を判断してルーティングする。
+/// 複数候補の場合は番号選択 UI を表示（インタラクティブ部分のみ main.rs に残す）。
 async fn dispatch_prompt_events(
     prompt_str: String,
     ai_url: Option<String>,
@@ -192,15 +193,15 @@ async fn dispatch_prompt_events(
     let ai_config = Config::load(config_path).map(|c| c.ai).unwrap_or_default();
     let base_url = ai_url.as_deref().unwrap_or(&ai_config.base_url).to_string();
     let model = ai_model.as_deref().unwrap_or(&ai_config.model).to_string();
-    let client = OllamaClient::new(base_url, model);
+    let ai_client = OllamaClient::new(base_url, model);
 
-    let intent = client.parse_operation_intent(&prompt_str).await?;
+    let intent = ai_client.parse_operation_intent(&prompt_str).await?;
     let today = Local::now().date_naive();
     let mut out = std::io::stdout();
 
     match intent.operation.as_str() {
         "add" => {
-            let ai_params = client.parse_prompt(&prompt_str).await?;
+            let ai_params = ai_client.parse_prompt(&prompt_str).await?;
             let (calendar_id, calendar_display_name) =
                 resolve_calendar_from_args(config_path, calendar, Some(&ai_params));
             let event = CliMapper::map_add_command(AddCommandInput {
@@ -220,7 +221,7 @@ async fn dispatch_prompt_events(
             app.handle_add_event(event, &mut out).await?;
         }
 
-        "delete" => {
+        op @ ("delete" | "update") => {
             let target = intent.target.unwrap_or(AiEventTarget {
                 title_hint: None,
                 date_hint: None,
@@ -231,11 +232,12 @@ async fn dispatch_prompt_events(
                 calendar.as_deref(),
                 calendars.as_deref(),
             );
-            let (time_min, time_max) =
-                build_search_range(target.date_hint.as_deref(), today)?;
+            let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
 
             let app = build_app(config_path)?;
-            let all_events = fetch_all_events(&app, &calendar_ids, time_min, time_max).await?;
+            let all_events = prompt_flow::fetch_events(
+                &app.calendar_client, &calendar_ids, time_min, time_max,
+            ).await?;
             let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
             let matched = event_selector::filter_by_target(&summaries, &target, today);
 
@@ -246,66 +248,38 @@ async fn dispatch_prompt_events(
             let selected_idx = if matched.len() == 1 {
                 matched[0]
             } else {
-                select_event_from_candidates(&all_events, &matched)?
+                let list = prompt_flow::format_candidate_list(&all_events, &matched);
+                print!("{list}");
+                select_candidate_index(&matched)?
             };
-            let (cal_id, event) = &all_events[selected_idx];
-            if !yes {
-                if !confirm_or_cancel(&format!(
-                    "「{}」を削除しますか? [y/N]: ",
-                    event.summary
-                ))? {
-                    return Ok(());
+
+            if op == "delete" {
+                let (cal_id, event) = &all_events[selected_idx];
+                if !yes {
+                    if !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
+                        return Ok(());
+                    }
                 }
-            }
-            app.handle_delete_event(cal_id, &event.id, &mut out).await?;
-        }
-
-        "update" => {
-            let target = intent.target.unwrap_or(AiEventTarget {
-                title_hint: None,
-                date_hint: None,
-                calendar: None,
-            });
-            let config = Config::load(config_path).unwrap_or_default();
-            let calendar_ids = config.resolve_event_calendars(
-                calendar.as_deref(),
-                calendars.as_deref(),
-            );
-            let (time_min, time_max) =
-                build_search_range(target.date_hint.as_deref(), today)?;
-
-            let app = build_app(config_path)?;
-            let all_events = fetch_all_events(&app, &calendar_ids, time_min, time_max).await?;
-            let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
-            let matched = event_selector::filter_by_target(&summaries, &target, today);
-
-            if matched.is_empty() {
-                println!("候補イベントが見つかりませんでした");
-                return Ok(());
-            }
-            let selected_idx = if matched.len() == 1 {
-                matched[0]
+                app.handle_delete_event(cal_id, &event.id, &mut out).await?;
             } else {
-                select_event_from_candidates(&all_events, &matched)?
-            };
-            let (cal_id, selected) = &all_events[selected_idx];
-
-            let ai_params = client.parse_prompt(&prompt_str).await?;
-            let update_event = CliMapper::map_update_command(crate::UpdateCommandInput {
-                event_id: selected.id.clone(),
-                calendar: cal_id.clone(),
-                calendar_display_name: cal_id.clone(),
-                today,
-                ai_params: Some(ai_params),
-                ..Default::default()
-            })?;
-            if !yes {
-                write_update_event_dry_run(&update_event, &mut out)?;
-                if !confirm_or_cancel("この内容で更新しますか? [y/N]: ")? {
-                    return Ok(());
+                let (cal_id, selected) = &all_events[selected_idx];
+                let ai_params = ai_client.parse_prompt(&prompt_str).await?;
+                let update_event = CliMapper::map_update_command(UpdateCommandInput {
+                    event_id: selected.id.clone(),
+                    calendar: cal_id.clone(),
+                    calendar_display_name: cal_id.clone(),
+                    today,
+                    ai_params: Some(ai_params),
+                    ..Default::default()
+                })?;
+                if !yes {
+                    write_update_event_dry_run(&update_event, &mut out)?;
+                    if !confirm_or_cancel("この内容で更新しますか? [y/N]: ")? {
+                        return Ok(());
+                    }
                 }
+                app.handle_update_event(update_event, &mut out).await?;
             }
-            app.handle_update_event(update_event, &mut out).await?;
         }
 
         other => {
@@ -326,9 +300,9 @@ async fn dispatch_prompt_delete(
     config_path: &std::path::Path,
 ) -> Result<(), GcalError> {
     let ai_config = Config::load(config_path).map(|c| c.ai).unwrap_or_default();
-    let client = OllamaClient::new(ai_config.base_url, ai_config.model);
+    let ai_client = OllamaClient::new(ai_config.base_url, ai_config.model);
 
-    let intent = client.parse_operation_intent(&prompt_str).await?;
+    let intent = ai_client.parse_operation_intent(&prompt_str).await?;
     let target = intent.target.unwrap_or(AiEventTarget {
         title_hint: None,
         date_hint: None,
@@ -338,10 +312,12 @@ async fn dispatch_prompt_delete(
     let today = Local::now().date_naive();
     let config = Config::load(config_path).unwrap_or_default();
     let calendar_ids = config.resolve_event_calendars(None, None);
-    let (time_min, time_max) = build_search_range(target.date_hint.as_deref(), today)?;
+    let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
 
     let app = build_app(config_path)?;
-    let all_events = fetch_all_events(&app, &calendar_ids, time_min, time_max).await?;
+    let all_events = prompt_flow::fetch_events(
+        &app.calendar_client, &calendar_ids, time_min, time_max,
+    ).await?;
     let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
     let matched = event_selector::filter_by_target(&summaries, &target, today);
 
@@ -352,7 +328,9 @@ async fn dispatch_prompt_delete(
     let selected_idx = if matched.len() == 1 {
         matched[0]
     } else {
-        select_event_from_candidates(&all_events, &matched)?
+        let list = prompt_flow::format_candidate_list(&all_events, &matched);
+        print!("{list}");
+        select_candidate_index(&matched)?
     };
     let (cal_id, event) = &all_events[selected_idx];
     let mut out = std::io::stdout();
@@ -365,57 +343,8 @@ async fn dispatch_prompt_delete(
     Ok(())
 }
 
-/// date_hint から検索時間範囲を計算する。
-/// hint が Some → parse_date_expr でその日の範囲、None → 今日から 14 日間
-fn build_search_range(
-    date_hint: Option<&str>,
-    today: chrono::NaiveDate,
-) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), GcalError> {
-    if let Some(hint) = date_hint {
-        let range = parse_date_expr(hint, today)?;
-        Ok((naive_date_to_utc_start(range.from)?, naive_date_to_utc_end(range.to)?))
-    } else {
-        Ok((
-            naive_date_to_utc_start(today)?,
-            naive_date_to_utc_end(today + Duration::days(14))?,
-        ))
-    }
-}
-
-/// 全カレンダーからイベントを収集して (calendar_id, EventSummary) ペアで返す。
-async fn fetch_all_events(
-    app: &App<GoogleCalendarClient<RefreshingTokenProvider<FileTokenStore, SystemClock>>>,
-    calendar_ids: &[String],
-    time_min: chrono::DateTime<chrono::Utc>,
-    time_max: chrono::DateTime<chrono::Utc>,
-) -> Result<Vec<(String, EventSummary)>, GcalError> {
-    let mut all_events = Vec::new();
-    for cal_id in calendar_ids {
-        let query = EventQuery { calendar_id: cal_id.clone(), time_min, time_max };
-        let events = app.calendar_client.list_events(query).await?;
-        for e in events {
-            all_events.push((cal_id.clone(), e));
-        }
-    }
-    Ok(all_events)
-}
-
-/// 候補イベントを番号付きで表示してユーザーに選択させ、selected_idx を返す。
-fn select_event_from_candidates(
-    events: &[(String, EventSummary)],
-    matched: &[usize],
-) -> Result<usize, GcalError> {
-    println!("複数のイベントが見つかりました:");
-    for (num, &idx) in matched.iter().enumerate() {
-        let (_, e) = &events[idx];
-        let date_str = match &e.start {
-            EventStart::Date(d) => d.format("%Y/%m/%d").to_string(),
-            EventStart::DateTime(dt) => {
-                dt.with_timezone(&Local).format("%Y/%m/%d %H:%M").to_string()
-            }
-        };
-        println!("  {}. {} {}", num + 1, date_str, e.summary);
-    }
+/// 候補番号をユーザーから受け取り matched[n-1] を返す。
+fn select_candidate_index(matched: &[usize]) -> Result<usize, GcalError> {
     let answer = prompt(&format!("番号を選択してください (1-{}): ", matched.len()))?;
     let n: usize = answer.trim().parse().map_err(|_| {
         GcalError::ConfigError(format!("無効な番号です: '{}'", answer.trim()))
