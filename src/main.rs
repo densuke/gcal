@@ -27,9 +27,47 @@ async fn main() {
 
 async fn run() -> Result<(), GcalError> {
     let cli = Cli::parse();
-    let config_path = Config::default_path()?;
+    let mut load_info = Vec::new();
 
-    match cli.command {
+    let config_path = if let Some(path) = cli.config.clone() {
+        load_info.push(format!("1. [Explicit] 指定された設定ファイル: {:?}", path));
+        path
+    } else {
+        let default = Config::default_path()?;
+        load_info.push(format!("1. [Default]  デフォルトの設定ファイル: {:?}", default));
+        default
+    };
+
+    if cli.verbose || cli.show_config {
+        for info in &load_info {
+            eprintln!("Info: {}", info);
+        }
+    }
+
+    if cli.show_config {
+        match Config::load(&config_path) {
+            Ok(config) => {
+                println!("\n{}", config.display_config());
+            }
+            Err(e) => {
+                eprintln!("Warning: 設定ファイルを読み込めませんでした: {e}");
+                println!("\n--- Current Configuration ---\n  (Using Defaults)\n------------------------------");
+            }
+        }
+        return Ok(());
+    }
+
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            use clap::CommandFactory;
+            Cli::command().print_help()?;
+            println!();
+            return Ok(());
+        }
+    };
+
+    match command {
         Commands::Init { manual } => {
             let (client_id, client_secret) = resolve_credentials(&config_path)?;
             let ai_config = resolve_ai_config(&config_path)?;

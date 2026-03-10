@@ -4,7 +4,19 @@ use clap::{Args, Parser, Subcommand};
 #[command(name = "gcal", version, about = "Google Calendar CLI tool")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
+
+    /// 設定ファイルのパスを指定する (デフォルト: ~/.config/gcal/config.toml)
+    #[arg(short, long, global = true)]
+    pub config: Option<std::path::PathBuf>,
+
+    /// 詳細出力を有効にする (設定ファイルのパスなどを表示)
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+
+    /// 読み込まれた設定内容を表示する (機密情報はマスクされます)
+    #[arg(long, global = true)]
+    pub show_config: bool,
 }
 
 /// 繰り返し設定（Add / Update で共通）

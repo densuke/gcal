@@ -142,6 +142,51 @@ impl Config {
         std::fs::write(path, content)
             .map_err(|e| GcalError::ConfigError(format!("書き込みエラー: {e}")))
     }
+
+    /// 設定内容を表示用にフォーマットする (機密情報はマスクされる)
+    pub fn display_config(&self) -> String {
+        let mut out = String::new();
+        out.push_str("--- Current Configuration ---\n");
+        out.push_str(&format!("[Credentials]\n"));
+        out.push_str(&format!("  Client ID:     {}\n", mask_string(&self.credentials.client_id)));
+        out.push_str(&format!("  Client Secret: {}\n", mask_string(&self.credentials.client_secret)));
+
+        if let Some(t) = &self.token {
+            out.push_str("[Token]\n");
+            out.push_str(&format!("  Access Token:  {}\n", mask_string(&t.access_token)));
+            out.push_str(&format!("  Refresh Token: {}\n", t.refresh_token.as_ref().map(|s| mask_string(s)).unwrap_or_else(|| "None".to_string())));
+            out.push_str(&format!("  Expires At:    {:?}\n", t.expires_at));
+        } else {
+            out.push_str("[Token]\n  Not authenticated\n");
+        }
+
+        out.push_str("[AI (Ollama)]\n");
+        out.push_str(&format!("  Base URL:      {}\n", self.ai.base_url));
+        out.push_str(&format!("  Model:         {}\n", self.ai.model));
+        out.push_str(&format!("  Enabled:       {}\n", self.ai.enabled));
+
+        out.push_str("[Calendars/Aliases]\n");
+        if self.calendars.is_empty() {
+            out.push_str("  No aliases configured\n");
+        } else {
+            for (name, id) in &self.calendars {
+                out.push_str(&format!("  {} => {}\n", name, id));
+            }
+        }
+
+        out.push_str("[Events]\n");
+        out.push_str(&format!("  Default Calendars: {:?}\n", self.events.default_calendars));
+        out.push_str("------------------------------");
+        out
+    }
+}
+
+fn mask_string(s: &str) -> String {
+    if s.len() <= 8 {
+        "********".to_string()
+    } else {
+        format!("{}********{}", &s[..4], &s[s.len() - 4..])
+    }
 }
 
 /// ファイルベースの TokenStore 実装
