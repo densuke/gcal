@@ -112,19 +112,22 @@ async fn run() -> Result<(), GcalError> {
             app.handle_update_event(event, &mut out).await?;
         }
 
-        Commands::Delete { event_id, force, calendar } => {
+        Commands::Delete { event_id, prompt, ai, force, calendar } => {
             let (calendar_id, _) = resolve_calendar(&config_path, &calendar);
+            // ID 直接指定フロー（従来通り）
+            let id = event_id.expect("event_id か --prompt/--ai のどちらかが必須（clap ArgGroup で保証）");
+            let _ = (prompt, ai); // 将来の -p フロー用（フェーズ4で実装）
             if !force {
                 if !confirm_or_cancel(&format!(
                     "イベント (ID: {}) を削除しますか? [y/N]: ",
-                    event_id
+                    id
                 ))? {
                     return Ok(());
                 }
             }
             let app = build_app(&config_path)?;
             let mut out = std::io::stdout();
-            app.handle_delete_event(&calendar_id, &event_id, &mut out).await?;
+            app.handle_delete_event(&calendar_id, &id, &mut out).await?;
         }
 
         Commands::Events { calendar, calendars, days, date, from, to, ids } => {

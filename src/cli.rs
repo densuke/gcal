@@ -142,9 +142,17 @@ pub enum Commands {
         ai_args: AiArgs,
     },
     /// 既存の予定を削除
+    #[command(group = clap::ArgGroup::new("target").required(true).args(["event_id", "prompt", "ai"]))]
     Delete {
-        /// イベント ID
-        event_id: String,
+        /// イベント ID（--prompt/--ai と排他、どちらか必須）
+        #[arg(group = "target")]
+        event_id: Option<String>,
+        /// 自然言語でイベントを特定して削除
+        #[arg(short = 'p', long, group = "target")]
+        prompt: Option<String>,
+        /// 自然言語プロンプト（後方互換、--prompt と排他）
+        #[arg(long, conflicts_with = "prompt", group = "target")]
+        ai: Option<String>,
         /// 確認をスキップして削除
         #[arg(short = 'f', long)]
         force: bool,
@@ -348,6 +356,41 @@ mod tests {
         } else {
             panic!("Expected Delete command");
         }
+    }
+
+    #[test]
+    fn test_cli_delete_by_id() {
+        let cli = Cli::try_parse_from(["gcal", "delete", "evt_abc123"]).unwrap();
+        if let Commands::Delete { event_id, prompt, .. } = cli.command {
+            assert_eq!(event_id, Some("evt_abc123".to_string()));
+            assert_eq!(prompt, None);
+        } else {
+            panic!("Expected Delete command");
+        }
+    }
+
+    #[test]
+    fn test_cli_delete_by_prompt() {
+        let cli = Cli::try_parse_from(["gcal", "delete", "-p", "明日の会議を削除"]).unwrap();
+        if let Commands::Delete { event_id, prompt, .. } = cli.command {
+            assert_eq!(event_id, None);
+            assert_eq!(prompt.as_deref(), Some("明日の会議を削除"));
+        } else {
+            panic!("Expected Delete command");
+        }
+    }
+
+    #[test]
+    fn test_cli_delete_requires_id_or_prompt() {
+        // どちらも指定しない場合はエラー
+        let result = Cli::try_parse_from(["gcal", "delete"]);
+        assert!(result.is_err(), "event_id か --prompt のどちらかが必須のはず");
+    }
+
+    #[test]
+    fn test_cli_delete_id_and_prompt_are_exclusive() {
+        let result = Cli::try_parse_from(["gcal", "delete", "evt_id", "-p", "会議を削除"]);
+        assert!(result.is_err(), "event_id と --prompt は排他のはず");
     }
 
     #[test]
