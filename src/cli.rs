@@ -77,30 +77,43 @@ pub enum Commands {
         #[command(subcommand)]
         sub: Option<CalendarSubcommands>,
     },
-    /// 直近のイベントを表示
+    /// 直近のイベントを表示、または -p で CRUD 操作を自然言語で実行
     Events {
         /// 対象カレンダーの ID またはエイリアス（--calendars と排他）
-        #[arg(long, conflicts_with = "calendars")]
+        #[arg(long, conflicts_with_all = ["calendars", "prompt"])]
         calendar: Option<String>,
         /// カンマ区切りで複数カレンダーを指定（--calendar と排他）
         /// 例: --calendars 仕事,個人
-        #[arg(long, conflicts_with = "calendar")]
+        #[arg(long, conflicts_with_all = ["calendar", "prompt"])]
         calendars: Option<String>,
-        /// 取得する日数（--date / --from / --to と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "from", "to"])]
+        /// 取得する日数（--date / --from / --to / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "from", "to", "prompt"])]
         days: Option<u64>,
         /// イベント ID を表示する
-        #[arg(long)]
+        #[arg(long, conflicts_with = "prompt")]
         ids: bool,
-        /// 日付・期間を自然言語で指定（--days / --from / --to と同時指定不可）
-        #[arg(long, conflicts_with_all = ["days", "from", "to"])]
+        /// 日付・期間を自然言語で指定（--days / --from / --to / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["days", "from", "to", "prompt"])]
         date: Option<String>,
-        /// 開始日を自然言語で指定（--date / --days と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "days"])]
+        /// 開始日を自然言語で指定（--date / --days / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "days", "prompt"])]
         from: Option<String>,
-        /// 終了日を自然言語で指定（--date / --days と同時指定不可）
-        #[arg(long, conflicts_with_all = ["date", "days"])]
+        /// 終了日を自然言語で指定（--date / --days / --prompt と同時指定不可）
+        #[arg(long, conflicts_with_all = ["date", "days", "prompt"])]
         to: Option<String>,
+        /// 自然言語で CRUD 操作を実行（他の表示系オプションと排他）
+        #[arg(short = 'p', long,
+              conflicts_with_all = ["calendar", "calendars", "days", "ids", "date", "from", "to"])]
+        prompt: Option<String>,
+        /// AI サーバーの URL（--prompt 使用時のオーバーライド）
+        #[arg(long, requires = "prompt")]
+        ai_url: Option<String>,
+        /// AI モデル名（--prompt 使用時のオーバーライド）
+        #[arg(long, requires = "prompt")]
+        ai_model: Option<String>,
+        /// 確認プロンプトをスキップ（--prompt 使用時）
+        #[arg(short = 'y', long, requires = "prompt")]
+        yes: bool,
     },
     /// 既存の予定を更新（--title / --start・--end / --date のうち少なくとも1つ必須）
     Update {
@@ -391,6 +404,28 @@ mod tests {
     fn test_cli_delete_id_and_prompt_are_exclusive() {
         let result = Cli::try_parse_from(["gcal", "delete", "evt_id", "-p", "会議を削除"]);
         assert!(result.is_err(), "event_id と --prompt は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_events_prompt_flag() {
+        let cli = Cli::try_parse_from(["gcal", "events", "-p", "明日の会議を削除して"]).unwrap();
+        if let Commands::Events { prompt, .. } = cli.command {
+            assert_eq!(prompt.as_deref(), Some("明日の会議を削除して"));
+        } else {
+            panic!("Expected Events command");
+        }
+    }
+
+    #[test]
+    fn test_cli_events_prompt_conflicts_with_date() {
+        let result = Cli::try_parse_from(["gcal", "events", "-p", "test", "--date", "今日"]);
+        assert!(result.is_err(), "--prompt と --date は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_events_prompt_conflicts_with_days() {
+        let result = Cli::try_parse_from(["gcal", "events", "-p", "test", "--days", "7"]);
+        assert!(result.is_err(), "--prompt と --days は排他のはず");
     }
 
     #[test]

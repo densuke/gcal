@@ -130,7 +130,9 @@ async fn run() -> Result<(), GcalError> {
             app.handle_delete_event(&calendar_id, &id, &mut out).await?;
         }
 
-        Commands::Events { calendar, calendars, days, date, from, to, ids } => {
+        Commands::Events { calendar, calendars, days, date, from, to, ids, prompt, ai_url, ai_model, yes } => {
+            // --prompt/-p: CRUD ディスパッチモード（将来フェーズで実装）
+            let _ = (prompt, ai_url, ai_model, yes);
             let config = Config::load(&config_path).unwrap_or_default();
             let calendar_ids = config.resolve_event_calendars(
                 calendar.as_deref(),
