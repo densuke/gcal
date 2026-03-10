@@ -116,21 +116,25 @@ async fn run() -> Result<(), GcalError> {
         }
 
         Commands::Delete { event_id, prompt, ai, force, calendar } => {
-            let (calendar_id, _) = resolve_calendar(&config_path, &calendar);
-            // ID 直接指定フロー（従来通り）
-            let id = event_id.expect("event_id か --prompt/--ai のどちらかが必須（clap ArgGroup で保証）");
-            let _ = (prompt, ai); // 将来の -p フロー用（フェーズ4で実装）
-            if !force {
-                if !confirm_or_cancel(&format!(
-                    "イベント (ID: {}) を削除しますか? [y/N]: ",
-                    id
-                ))? {
-                    return Ok(());
+            if let Some(prompt_str) = prompt.or(ai) {
+                // 自然文フロー: 候補イベントを特定して削除
+                dispatch_prompt_delete(prompt_str, force, &config_path).await?;
+            } else {
+                // ID 直接指定フロー（従来通り）
+                let (calendar_id, _) = resolve_calendar(&config_path, &calendar);
+                let id = event_id.expect("event_id は ArgGroup で保証");
+                if !force {
+                    if !confirm_or_cancel(&format!(
+                        "イベント (ID: {}) を削除しますか? [y/N]: ",
+                        id
+                    ))? {
+                        return Ok(());
+                    }
                 }
+                let app = build_app(&config_path)?;
+                let mut out = std::io::stdout();
+                app.handle_delete_event(&calendar_id, &id, &mut out).await?;
             }
-            let app = build_app(&config_path)?;
-            let mut out = std::io::stdout();
-            app.handle_delete_event(&calendar_id, &id, &mut out).await?;
         }
 
         Commands::Events { calendar, calendars, days, date, from, to, ids, prompt, ai_url, ai_model, yes } => {
@@ -311,6 +315,53 @@ async fn dispatch_prompt_events(
             )));
         }
     }
+    Ok(())
+}
+
+/// delete -p/-ai フローのエントリポイント。
+/// 自然文でイベントを特定して削除する。
+async fn dispatch_prompt_delete(
+    prompt_str: String,
+    force: bool,
+    config_path: &std::path::Path,
+) -> Result<(), GcalError> {
+    let ai_config = Config::load(config_path).map(|c| c.ai).unwrap_or_default();
+    let client = OllamaClient::new(ai_config.base_url, ai_config.model);
+
+    let intent = client.parse_operation_intent(&prompt_str).await?;
+    let target = intent.target.unwrap_or(AiEventTarget {
+        title_hint: None,
+        date_hint: None,
+        calendar: None,
+    });
+
+    let today = Local::now().date_naive();
+    let config = Config::load(config_path).unwrap_or_default();
+    let calendar_ids = config.resolve_event_calendars(None, None);
+    let (time_min, time_max) = build_search_range(target.date_hint.as_deref(), today)?;
+
+    let app = build_app(config_path)?;
+    let all_events = fetch_all_events(&app, &calendar_ids, time_min, time_max).await?;
+    let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
+    let matched = event_selector::filter_by_target(&summaries, &target, today);
+
+    if matched.is_empty() {
+        println!("候補イベントが見つかりませんでした");
+        return Ok(());
+    }
+    let selected_idx = if matched.len() == 1 {
+        matched[0]
+    } else {
+        select_event_from_candidates(&all_events, &matched)?
+    };
+    let (cal_id, event) = &all_events[selected_idx];
+    let mut out = std::io::stdout();
+    if !force {
+        if !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
+            return Ok(());
+        }
+    }
+    app.handle_delete_event(cal_id, &event.id, &mut out).await?;
     Ok(())
 }
 
