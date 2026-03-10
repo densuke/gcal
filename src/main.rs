@@ -70,7 +70,7 @@ async fn run() -> Result<(), GcalError> {
 
         Commands::Add { title, date, start, end, location, calendar, recurrence, reminder_args, ai_args } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(ai_args.prompt.or(ai_args.ai), ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
             let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
@@ -92,7 +92,7 @@ async fn run() -> Result<(), GcalError> {
 
         Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, ai_args } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai_args.ai, ai_args.ai_url, ai_args.ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(ai_args.prompt.or(ai_args.ai), ai_args.ai_url, ai_args.ai_model, &config_path).await?;
             let used_ai = ai_params.is_some();
             let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 

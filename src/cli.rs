@@ -44,8 +44,11 @@ pub struct ReminderArgs {
 /// AI・実行制御フラグ（Add / Update で共通）
 #[derive(Args, Debug, Default)]
 pub struct AiArgs {
-    /// AIに渡す自然言語プロンプト（例: "明日の14時から会議室Aでミーティング"）
-    #[arg(long)]
+    /// 自然言語プロンプト（--ai の後継）
+    #[arg(short = 'p', long, conflicts_with = "ai")]
+    pub prompt: Option<String>,
+    /// 自然言語プロンプト（後方互換、--prompt と排他）
+    #[arg(long, conflicts_with = "prompt")]
     pub ai: Option<String>,
     /// AI サーバーのベースURL（設定をオーバーライド）
     #[arg(long)]
@@ -56,7 +59,7 @@ pub struct AiArgs {
     /// カレンダーへの書き込みを行わず、実行予定の内容を表示して終了
     #[arg(long)]
     pub dry_run: bool,
-    /// --ai 使用時の確認プロンプトをスキップして即時実行
+    /// --prompt/--ai 使用時の確認プロンプトをスキップして即時実行
     #[arg(short = 'y', long)]
     pub yes: bool,
 }
@@ -282,6 +285,55 @@ mod tests {
         let cli = Cli::try_parse_from(["gcal", "add", "--ai", "MTG", "-y"]).unwrap();
         if let Commands::Add { ai_args, .. } = cli.command {
             assert!(ai_args.yes);
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_prompt_short_flag() {
+        let cli = Cli::try_parse_from(["gcal", "add", "-p", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("明日の会議"));
+            assert_eq!(ai_args.ai, None);
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_prompt_long_flag() {
+        let cli = Cli::try_parse_from(["gcal", "add", "--prompt", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("明日の会議"));
+        } else {
+            panic!("Expected Add command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_prompt_and_ai_are_exclusive() {
+        let result = Cli::try_parse_from(["gcal", "add", "--prompt", "test", "--ai", "test"]);
+        assert!(result.is_err(), "--prompt と --ai は排他のはず");
+    }
+
+    #[test]
+    fn test_cli_update_prompt_flag() {
+        let cli = Cli::try_parse_from(["gcal", "update", "evt_id", "-p", "場所を変更"]).unwrap();
+        if let Commands::Update { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.prompt.as_deref(), Some("場所を変更"));
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+
+    #[test]
+    fn test_cli_add_ai_still_works_for_compat() {
+        // --ai は後方互換のため引き続き動作すること
+        let cli = Cli::try_parse_from(["gcal", "add", "--ai", "明日の会議"]).unwrap();
+        if let Commands::Add { ai_args, .. } = cli.command {
+            assert_eq!(ai_args.ai.as_deref(), Some("明日の会議"));
+            assert_eq!(ai_args.prompt, None);
         } else {
             panic!("Expected Add command");
         }
