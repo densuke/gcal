@@ -38,22 +38,22 @@ async fn run() -> Result<(), GcalError> {
 
     // 1. ホームディレクトリ直下: ~/.gcal.toml
     if let Some(home) = dirs::home_dir() {
-        candidate_paths.push((format!("[Home]    "), home.join(".gcal.toml")));
+        candidate_paths.push(("[Home]    ".to_string(), home.join(".gcal.toml")));
     }
     // 2. XDG準拠: ~/.config/gcal/config.toml
     if let Some(home) = dirs::home_dir() {
-        candidate_paths.push((format!("[XDG]     "), home.join(".config").join("gcal").join("config.toml")));
+        candidate_paths.push(("[XDG]     ".to_string(), home.join(".config").join("gcal").join("config.toml")));
     }
     // 3. OS依存の標準の場所: (macOSなら ~/Library/Application Support/gcal/config.toml)
     if let Some(os_config) = dirs::config_dir() {
-        candidate_paths.push((format!("[OS-Spec] "), os_config.join("gcal").join("config.toml")));
+        candidate_paths.push(("[OS-Spec] ".to_string(), os_config.join("gcal").join("config.toml")));
     }
     // 4. カレントディレクトリ: ./.gcal.toml
-    candidate_paths.push((format!("[Current] "), std::path::PathBuf::from(".gcal.toml")));
+    candidate_paths.push(("[Current] ".to_string(), std::path::PathBuf::from(".gcal.toml")));
 
     // 5. CLI引数で指定されたパス（あれば最強）
     if let Some(ref path) = cli.config {
-        candidate_paths.push((format!("[Explicit]"), path.clone()));
+        candidate_paths.push(("[Explicit]".to_string(), path.clone()));
     }
 
     // 重複するパスを除去（OS-Spec と XDG が同じ場合があるため）
@@ -206,14 +206,13 @@ async fn run() -> Result<(), GcalError> {
                 // ID 直接指定フロー（従来通り）
                 let (calendar_id, _) = resolve_calendar(&config_path, &calendar);
                 let id = event_id.expect("event_id は ArgGroup で保証");
-                if !force {
-                    if !confirm_or_cancel(&format!(
+                if !force
+                    && !confirm_or_cancel(&format!(
                         "イベント (ID: {}) を削除しますか? [y/N]: ",
                         id
                     ))? {
                         return Ok(());
                     }
-                }
                 let app = build_app(&config_path)?;
                 let mut out = std::io::stdout();
                 app.handle_delete_event(&calendar_id, &id, &mut out).await?;
@@ -237,7 +236,7 @@ async fn run() -> Result<(), GcalError> {
                 );
                 let today = Local::now().date_naive();
                 let (time_min, time_max) = CliMapper::map_events_command(
-                    date, from, to, days.map(|x| x as u64), today
+                    date, from, to, days, today
                 )?;
 
                 let app = build_app(&config_path)?;
@@ -354,11 +353,10 @@ async fn dispatch_prompt_events(
 
             if op == "delete" {
                 let (cal_id, event) = &all_events[selected_idx];
-                if !yes {
-                    if !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
+                if !yes
+                    && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
                         return Ok(());
                     }
-                }
                 app.handle_delete_event(cal_id, &event.id, &mut out).await?;
             } else {
                 let (cal_id, selected) = &all_events[selected_idx];
@@ -433,11 +431,10 @@ async fn dispatch_prompt_delete(
     };
     let (cal_id, event) = &all_events[selected_idx];
     let mut out = std::io::stdout();
-    if !force {
-        if !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
+    if !force
+        && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
             return Ok(());
         }
-    }
     app.handle_delete_event(cal_id, &event.id, &mut out).await?;
     Ok(())
 }
@@ -501,8 +498,8 @@ fn load_credentials(config_path: &std::path::Path) -> Result<(String, String), G
 /// `gcal init` 時に使う認証情報を決定する。
 /// 既存の設定ファイルに client_id が残っていれば表示して再利用を選択できる。
 fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String), GcalError> {
-    if let Ok(config) = Config::load(config_path) {
-        if !config.credentials.client_id.is_empty() {
+    if let Ok(config) = Config::load(config_path)
+        && !config.credentials.client_id.is_empty() {
             println!("既存の認証情報が見つかりました:");
             println!("  Client ID: ********");
             let answer = prompt("既存の認証情報を使いますか? [Y/n]: ")?;
@@ -510,7 +507,6 @@ fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String)
                 return Ok((config.credentials.client_id, config.credentials.client_secret));
             }
         }
-    }
     let client_id = prompt("Google OAuth2 Client ID: ")?;
     let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
         .map_err(GcalError::IoError)?;

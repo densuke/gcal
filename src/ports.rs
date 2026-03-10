@@ -65,7 +65,7 @@ pub struct SystemBrowserOpener;
 
 impl BrowserOpener for SystemBrowserOpener {
     fn open(&self, url: &str) -> Result<(), GcalError> {
-        open::that(url).map_err(|e| GcalError::IoError(e))
+        open::that(url).map_err(GcalError::IoError)
     }
 }
 

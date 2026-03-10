@@ -342,8 +342,8 @@ fn resolve_ai_reminder_item(
     item: &str,
     start: Option<DateTime<Local>>,
 ) -> Result<String, GcalError> {
-    if let Some((method, after_colon)) = item.split_once(':') {
-        if let Some(time_str) = after_colon.strip_prefix("prev-") {
+    if let Some((method, after_colon)) = item.split_once(':')
+        && let Some(time_str) = after_colon.strip_prefix("prev-") {
             let start_dt = start.ok_or_else(|| {
                 GcalError::ConfigError("「前日HH時」リマインダーには開始日時が必要です".to_string())
             })?;
@@ -360,7 +360,6 @@ fn resolve_ai_reminder_item(
                 return Ok(format!("{}:{}m", method, total));
             }
         }
-    }
     Ok(item.to_string())
 }
 

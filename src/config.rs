@@ -199,7 +199,7 @@ impl Config {
     pub fn display_config(&self) -> String {
         let mut out = String::new();
         out.push_str("--- Current Configuration ---\n");
-        out.push_str(&format!("[Credentials]\n"));
+        out.push_str("[Credentials]\n");
         out.push_str(&format!("  Client ID:     {}\n", mask_string(&self.credentials.client_id)));
         out.push_str(&format!("  Client Secret: {}\n", mask_string(&self.credentials.client_secret)));
 

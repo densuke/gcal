@@ -27,7 +27,7 @@ pub fn handle_list_aliases<W: Write>(
         writeln!(out, "エイリアスが設定されていません")?;
         return Ok(());
     }
-    writeln!(out, "{:<20}  {}", "エイリアス", "カレンダーID")?;
+    writeln!(out, "{:<20}  カレンダーID", "エイリアス")?;
     writeln!(out, "{:-<20}  {:-<40}", "", "")?;
     let mut entries: Vec<_> = config.calendars.iter().collect();
     entries.sort_by_key(|(k, _)| k.as_str());

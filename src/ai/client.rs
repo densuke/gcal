@@ -120,7 +120,7 @@ Output: {"title":"定例会議(役員限定)","date":"3/1","start":"10:00","end"
             .json(&payload)
             .send()
             .await
-            .map_err(|e| GcalError::HttpError(e))?;
+            .map_err(GcalError::HttpError)?;
 
         if !res.status().is_success() {
             let status = res.status();
@@ -130,13 +130,13 @@ Output: {"title":"定例会議(役員限定)","date":"3/1","start":"10:00","end"
 
         let resp_json: serde_json::Value = res.json()
             .await
-            .map_err(|e| GcalError::HttpError(e))?;
+            .map_err(GcalError::HttpError)?;
 
         let content_str = resp_json["message"]["content"].as_str()
             .ok_or_else(|| GcalError::ApiError { status: 500, message: "Ollamaのアウトプットからcontentが見つかりません".to_string() })?;
 
         let params: AiEventParameters = serde_json::from_str(content_str)
-            .map_err(|e| GcalError::JsonError(e))?;
+            .map_err(GcalError::JsonError)?;
 
         Ok(params)
     }

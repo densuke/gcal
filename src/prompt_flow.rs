@@ -19,7 +19,7 @@ use chrono::{Duration, Local, Timelike};
 
 /// events -p / delete -p の共通 "操作種別判定 → イベント特定" ワークフロー。
 /// `main.rs` は依存の組み立てだけを担い、ロジック本体はここに集約する。
-
+///
 /// `events -p <prompt>` のディスパッチフロー。
 /// - add → parse_prompt → handle_add_event
 /// - delete → find event → handle_delete_event

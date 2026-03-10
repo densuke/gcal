@@ -13,7 +13,7 @@ pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> 
         return Ok(());
     }
 
-    writeln!(out, "{:<40}  {}", "ID", "名前")?;
+    writeln!(out, "{:<40}  名前", "ID")?;
     writeln!(out, "{:-<40}  {:-<20}", "", "")?;
 
     for cal in calendars {
@@ -41,12 +41,11 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
     let any_running_today = events.iter().any(|e| {
         if let EventStart::DateTime(start_dt) = &e.start {
             let start_local: DateTime<Local> = DateTime::from(*start_dt);
-            if start_local.date_naive() == today {
-                if let Some(EventStart::DateTime(end_dt)) = &e.end {
+            if start_local.date_naive() == today
+                && let Some(EventStart::DateTime(end_dt)) = &e.end {
                     let end_local: DateTime<Local> = DateTime::from(*end_dt);
                     return start_local <= now && now < end_local;
                 }
-            }
         }
         false
     });
@@ -85,15 +84,14 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
         }
 
         // 進行中のイベントがない場合のみ、最初の未来イベントの前に現在時刻マーカーを挿入
-        if date == today && !current_time_marker_shown && !any_running_today {
-            if let EventStart::DateTime(dt) = &event.start {
+        if date == today && !current_time_marker_shown && !any_running_today
+            && let EventStart::DateTime(dt) = &event.start {
                 let start_local: DateTime<Local> = DateTime::from(*dt);
                 if start_local > now {
                     writeln!(out, "  —— 現在 ({}) ——", now.format("%H:%M"))?;
                     current_time_marker_shown = true;
                 }
             }
-        }
 
         // 現在進行中かどうか判定
         let is_running = if let EventStart::DateTime(dt) = &event.start {
