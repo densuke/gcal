@@ -18,14 +18,22 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             binary_name: gcal-macos-arm64
+            binary_path: gcal
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             binary_name: gcal-linux-x86_64
+            binary_path: gcal
 
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             binary_name: gcal-linux-arm64
+            binary_path: gcal
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: gcal-windows-x86_64.exe
+            binary_path: gcal.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -55,7 +63,8 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare binary
-        run: cp target/${{ matrix.target }}/release/gcal ${{ matrix.binary_name }}
+        shell: bash
+        run: cp target/${{ matrix.target }}/release/${{ matrix.binary_path }} ${{ matrix.binary_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -83,4 +92,5 @@ jobs:
             artifacts/gcal-macos-arm64/gcal-macos-arm64
             artifacts/gcal-linux-x86_64/gcal-linux-x86_64
             artifacts/gcal-linux-arm64/gcal-linux-arm64
+            artifacts/gcal-windows-x86_64.exe/gcal-windows-x86_64.exe
           generate_release_notes: true
