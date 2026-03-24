@@ -85,6 +85,28 @@ pub async fn run_init(
     Ok(())
 }
 
+fn build_oauth_client(
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: String,
+) -> Result<BasicClient, GcalError> {
+    let client = BasicClient::new(
+        ClientId::new(client_id.to_string()),
+        Some(ClientSecret::new(client_secret.to_string())),
+        AuthUrl::new(AUTH_URL.to_string())
+            .map_err(|e| GcalError::AuthError(format!("認証URL設定エラー: {e}")))?,
+        Some(
+            TokenUrl::new(TOKEN_URL.to_string())
+                .map_err(|e| GcalError::AuthError(format!("トークンURL設定エラー: {e}")))?,
+        ),
+    )
+    .set_redirect_uri(
+        RedirectUrl::new(redirect_uri)
+            .map_err(|e| GcalError::AuthError(format!("リダイレクトURL設定エラー: {e}")))?,
+    );
+    Ok(client)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,26 +166,4 @@ mod tests {
         .await;
         assert!(matches!(result, Err(GcalError::OAuthStateMismatch)));
     }
-}
-
-fn build_oauth_client(
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: String,
-) -> Result<BasicClient, GcalError> {
-    let client = BasicClient::new(
-        ClientId::new(client_id.to_string()),
-        Some(ClientSecret::new(client_secret.to_string())),
-        AuthUrl::new(AUTH_URL.to_string())
-            .map_err(|e| GcalError::AuthError(format!("認証URL設定エラー: {e}")))?,
-        Some(
-            TokenUrl::new(TOKEN_URL.to_string())
-                .map_err(|e| GcalError::AuthError(format!("トークンURL設定エラー: {e}")))?,
-        ),
-    )
-    .set_redirect_uri(
-        RedirectUrl::new(redirect_uri)
-            .map_err(|e| GcalError::AuthError(format!("リダイレクトURL設定エラー: {e}")))?,
-    );
-    Ok(client)
 }

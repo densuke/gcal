@@ -403,9 +403,7 @@ mod tests {
     }
 
     fn config_with_primary() -> Config {
-        let mut c = Config::default();
-        c.calendars = std::collections::HashMap::new();
-        c
+        Config::default()
     }
 
     // --- dispatch_prompt_delete のテスト ---

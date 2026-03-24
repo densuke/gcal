@@ -633,10 +633,12 @@ mod tests {
     fn test_config_save_and_load_with_calendars() {
         let dir = TempDir::new().unwrap();
         let path = temp_config_path(&dir);
-        let mut config = Config::default();
-        config.credentials = Credentials {
-            client_id: "cid".to_string(),
-            client_secret: "cs".to_string(),
+        let mut config = Config {
+            credentials: Credentials {
+                client_id: "cid".to_string(),
+                client_secret: "cs".to_string(),
+            },
+            ..Config::default()
         };
         config
             .calendars
@@ -674,10 +676,12 @@ mod tests {
     fn test_config_save_and_load_with_events() {
         let dir = TempDir::new().unwrap();
         let path = temp_config_path(&dir);
-        let mut config = Config::default();
-        config.credentials = Credentials {
-            client_id: "cid".to_string(),
-            client_secret: "cs".to_string(),
+        let mut config = Config {
+            credentials: Credentials {
+                client_id: "cid".to_string(),
+                client_secret: "cs".to_string(),
+            },
+            ..Config::default()
         };
         config.events.default_calendars = vec!["仕事".to_string(), "個人".to_string()];
         config.save(&path).unwrap();
