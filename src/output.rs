@@ -7,7 +7,10 @@ use crate::error::GcalError;
 use crate::gcal_api::models::EventReminders;
 
 /// カレンダー一覧を書き出す
-pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> Result<(), GcalError> {
+pub fn write_calendars<W: Write>(
+    out: &mut W,
+    calendars: &[CalendarSummary],
+) -> Result<(), GcalError> {
     if calendars.is_empty() {
         writeln!(out, "カレンダーが見つかりません")?;
         return Ok(());
@@ -28,7 +31,11 @@ pub fn write_calendars<W: Write>(out: &mut W, calendars: &[CalendarSummary]) -> 
 ///
 /// `show_ids` が true のとき、各行の末尾にイベント ID を表示する。
 /// 本日のイベント一覧の場合、現在時刻マーカーと進行中イベントマーカーを表示する。
-pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bool) -> Result<(), GcalError> {
+pub fn write_events<W: Write>(
+    out: &mut W,
+    events: &[EventSummary],
+    show_ids: bool,
+) -> Result<(), GcalError> {
     if events.is_empty() {
         writeln!(out, "イベントが見つかりません")?;
         return Ok(());
@@ -42,10 +49,11 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
         if let EventStart::DateTime(start_dt) = &e.start {
             let start_local: DateTime<Local> = DateTime::from(*start_dt);
             if start_local.date_naive() == today
-                && let Some(EventStart::DateTime(end_dt)) = &e.end {
-                    let end_local: DateTime<Local> = DateTime::from(*end_dt);
-                    return start_local <= now && now < end_local;
-                }
+                && let Some(EventStart::DateTime(end_dt)) = &e.end
+            {
+                let end_local: DateTime<Local> = DateTime::from(*end_dt);
+                return start_local <= now && now < end_local;
+            }
         }
         false
     });
@@ -84,14 +92,17 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
         }
 
         // 進行中のイベントがない場合のみ、最初の未来イベントの前に現在時刻マーカーを挿入
-        if date == today && !current_time_marker_shown && !any_running_today
-            && let EventStart::DateTime(dt) = &event.start {
-                let start_local: DateTime<Local> = DateTime::from(*dt);
-                if start_local > now {
-                    writeln!(out, "  —— 現在 ({}) ——", now.format("%H:%M"))?;
-                    current_time_marker_shown = true;
-                }
+        if date == today
+            && !current_time_marker_shown
+            && !any_running_today
+            && let EventStart::DateTime(dt) = &event.start
+        {
+            let start_local: DateTime<Local> = DateTime::from(*dt);
+            if start_local > now {
+                writeln!(out, "  —— 現在 ({}) ——", now.format("%H:%M"))?;
+                current_time_marker_shown = true;
             }
+        }
 
         // 現在進行中かどうか判定
         let is_running = if let EventStart::DateTime(dt) = &event.start {
@@ -108,9 +119,22 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
 
         let prefix = if is_running { "> " } else { "  " };
         if show_ids {
-            writeln!(out, "{}{}  {:<40}  [{}]", prefix, pad_time_display(&time_str), event.summary, event.id)?;
+            writeln!(
+                out,
+                "{}{}  {:<40}  [{}]",
+                prefix,
+                pad_time_display(&time_str),
+                event.summary,
+                event.id
+            )?;
         } else {
-            writeln!(out, "{}{}  {}", prefix, pad_time_display(&time_str), event.summary)?;
+            writeln!(
+                out,
+                "{}{}  {}",
+                prefix,
+                pad_time_display(&time_str),
+                event.summary
+            )?;
         }
     }
 
@@ -121,23 +145,45 @@ pub fn write_events<W: Write>(out: &mut W, events: &[EventSummary], show_ids: bo
 pub fn write_new_event_dry_run<W: Write>(event: &NewEvent, out: &mut W) -> Result<(), GcalError> {
     writeln!(out, "[ドライラン] 以下の内容で登録されます:")?;
     writeln!(out, "  タイトル:   {}", event.summary)?;
-    writeln!(out, "  開始:       {}", event.start.format("%Y-%m-%d %H:%M"))?;
+    writeln!(
+        out,
+        "  開始:       {}",
+        event.start.format("%Y-%m-%d %H:%M")
+    )?;
     writeln!(out, "  終了:       {}", event.end.format("%Y-%m-%d %H:%M"))?;
-    writeln!(out, "  場所:       {}", event.location.as_deref().unwrap_or("(なし)"))?;
+    writeln!(
+        out,
+        "  場所:       {}",
+        event.location.as_deref().unwrap_or("(なし)")
+    )?;
     match event.recurrence.as_deref() {
         None | Some([]) => writeln!(out, "  繰り返し:   (なし)")?,
         Some(rules) => writeln!(out, "  繰り返し:   {}", rules.join(", "))?,
     }
     writeln!(out, "  通知:       {}", format_reminders(&event.reminders))?;
-    let cal_display = event.calendar_display_name.as_ref().unwrap_or(&event.calendar_id);
+    let cal_display = event
+        .calendar_display_name
+        .as_ref()
+        .unwrap_or(&event.calendar_id);
     writeln!(out, "  カレンダー: {}", cal_display)?;
     Ok(())
 }
 
 /// `--dry-run` 時に UpdateEvent の内容を人間が読める形式で出力する
-pub fn write_update_event_dry_run<W: Write>(event: &UpdateEvent, out: &mut W) -> Result<(), GcalError> {
-    writeln!(out, "[ドライラン] 以下の内容で更新されます (ID: {}):", event.event_id)?;
-    writeln!(out, "  タイトル:   {}", event.title.as_deref().unwrap_or("(変更なし)"))?;
+pub fn write_update_event_dry_run<W: Write>(
+    event: &UpdateEvent,
+    out: &mut W,
+) -> Result<(), GcalError> {
+    writeln!(
+        out,
+        "[ドライラン] 以下の内容で更新されます (ID: {}):",
+        event.event_id
+    )?;
+    writeln!(
+        out,
+        "  タイトル:   {}",
+        event.title.as_deref().unwrap_or("(変更なし)")
+    )?;
     match (&event.start, &event.end) {
         (Some(s), Some(e)) => {
             writeln!(out, "  開始:       {}", s.format("%Y-%m-%d %H:%M"))?;
@@ -145,13 +191,20 @@ pub fn write_update_event_dry_run<W: Write>(event: &UpdateEvent, out: &mut W) ->
         }
         _ => writeln!(out, "  開始/終了:  (変更なし)")?,
     }
-    writeln!(out, "  場所:       {}", event.location.as_deref().unwrap_or("(変更なし)"))?;
+    writeln!(
+        out,
+        "  場所:       {}",
+        event.location.as_deref().unwrap_or("(変更なし)")
+    )?;
     let reminders_str = match &event.reminders {
         None => "(変更なし)".to_string(),
         Some(r) => format_reminders(&Some(r.clone())),
     };
     writeln!(out, "  通知:       {}", reminders_str)?;
-    let cal_display = event.calendar_display_name.as_ref().unwrap_or(&event.calendar_id);
+    let cal_display = event
+        .calendar_display_name
+        .as_ref()
+        .unwrap_or(&event.calendar_id);
     writeln!(out, "  カレンダー: {}", cal_display)?;
     Ok(())
 }
@@ -238,8 +291,18 @@ mod tests {
         }
     }
 
-    fn make_event_dt(id: &str, summary: &str, year: i32, month: u32, day: u32, hour: u32, min: u32) -> EventSummary {
-        let dt = Utc.with_ymd_and_hms(year, month, day, hour, min, 0).unwrap();
+    fn make_event_dt(
+        id: &str,
+        summary: &str,
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        min: u32,
+    ) -> EventSummary {
+        let dt = Utc
+            .with_ymd_and_hms(year, month, day, hour, min, 0)
+            .unwrap();
         EventSummary {
             id: id.to_string(),
             summary: summary.to_string(),
@@ -355,24 +418,48 @@ mod tests {
 
     #[test]
     fn test_write_events_show_ids() {
-        let events = vec![make_event_dt("abc1def2ghi3jkl4", "定例MTG", 2026, 2, 24, 1, 0)];
+        let events = vec![make_event_dt(
+            "abc1def2ghi3jkl4",
+            "定例MTG",
+            2026,
+            2,
+            24,
+            1,
+            0,
+        )];
         let mut out = Vec::new();
         write_events(&mut out, &events, true).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("定例MTG"));
-        assert!(s.contains("abc1def2ghi3jkl4"), "ID が表示されていない: {}", s);
+        assert!(
+            s.contains("abc1def2ghi3jkl4"),
+            "ID が表示されていない: {}",
+            s
+        );
     }
 
     #[test]
     fn test_write_events_no_ids_by_default() {
-        let events = vec![make_event_dt("abc1def2ghi3jkl4", "定例MTG", 2026, 2, 24, 1, 0)];
+        let events = vec![make_event_dt(
+            "abc1def2ghi3jkl4",
+            "定例MTG",
+            2026,
+            2,
+            24,
+            1,
+            0,
+        )];
         let mut out = Vec::new();
         write_events(&mut out, &events, false).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("定例MTG"));
-        assert!(!s.contains("abc1def2ghi3jkl4"), "ID が表示されてはいけない: {}", s);
+        assert!(
+            !s.contains("abc1def2ghi3jkl4"),
+            "ID が表示されてはいけない: {}",
+            s
+        );
     }
 
     // --- pad_time_display のテスト ---
@@ -404,7 +491,11 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         let allday_line = s.lines().find(|l| l.contains("祝日")).unwrap();
         // "終日" (表示幅4) → 7スペースパディング → + 区切り2スペース = 合計9スペース
-        assert!(allday_line.contains("終日         "), "パディングが正しくない: {:?}", allday_line);
+        assert!(
+            allday_line.contains("終日         "),
+            "パディングが正しくない: {:?}",
+            allday_line
+        );
     }
 
     #[test]
@@ -420,7 +511,10 @@ mod tests {
         use chrono::TimeZone;
         Local
             .from_local_datetime(
-                &NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap(),
+                &NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(h, min, 0)
+                    .unwrap(),
             )
             .single()
             .unwrap()
@@ -454,7 +548,10 @@ mod tests {
 
     #[test]
     fn test_dry_run_new_event_shows_location() {
-        let event = NewEvent { location: Some("会議室A".to_string()), ..base_new_event() };
+        let event = NewEvent {
+            location: Some("会議室A".to_string()),
+            ..base_new_event()
+        };
         let mut buf = Vec::new();
         write_new_event_dry_run(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
@@ -467,7 +564,10 @@ mod tests {
         let mut buf = Vec::new();
         write_new_event_dry_run(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("(なし)"), "場所なしプレースホルダーが含まれない: {s}");
+        assert!(
+            s.contains("(なし)"),
+            "場所なしプレースホルダーが含まれない: {s}"
+        );
     }
 
     #[test]
@@ -502,13 +602,19 @@ mod tests {
 
     #[test]
     fn test_format_reminders_use_default_shows_calendar_default() {
-        let r = EventReminders { use_default: true, overrides: None };
+        let r = EventReminders {
+            use_default: true,
+            overrides: None,
+        };
         assert_eq!(format_reminders(&Some(r)), "(カレンダーデフォルト)");
     }
 
     #[test]
     fn test_format_reminders_empty_overrides_shows_nashi() {
-        let r = EventReminders { use_default: false, overrides: Some(vec![]) };
+        let r = EventReminders {
+            use_default: false,
+            overrides: Some(vec![]),
+        };
         assert_eq!(format_reminders(&Some(r)), "(なし)");
     }
 
@@ -516,7 +622,10 @@ mod tests {
     fn test_format_reminders_popup_10m() {
         let r = EventReminders {
             use_default: false,
-            overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 10 }]),
+            overrides: Some(vec![EventReminderOverride {
+                method: "popup".to_string(),
+                minutes: 10,
+            }]),
         };
         assert_eq!(format_reminders(&Some(r)), "アプリ通知 10分前");
     }
@@ -525,7 +634,10 @@ mod tests {
     fn test_format_reminders_email_60m() {
         let r = EventReminders {
             use_default: false,
-            overrides: Some(vec![EventReminderOverride { method: "email".to_string(), minutes: 60 }]),
+            overrides: Some(vec![EventReminderOverride {
+                method: "email".to_string(),
+                minutes: 60,
+            }]),
         };
         assert_eq!(format_reminders(&Some(r)), "メール通知 60分前");
     }
@@ -535,8 +647,14 @@ mod tests {
         let r = EventReminders {
             use_default: false,
             overrides: Some(vec![
-                EventReminderOverride { method: "popup".to_string(), minutes: 10 },
-                EventReminderOverride { method: "email".to_string(), minutes: 60 },
+                EventReminderOverride {
+                    method: "popup".to_string(),
+                    minutes: 10,
+                },
+                EventReminderOverride {
+                    method: "email".to_string(),
+                    minutes: 60,
+                },
             ]),
         };
         let s = format_reminders(&Some(r));
@@ -552,7 +670,10 @@ mod tests {
         let mut buf = Vec::new();
         write_new_event_dry_run(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("カレンダーデフォルト"), "通知なし時のプレースホルダーが含まれない: {s}");
+        assert!(
+            s.contains("カレンダーデフォルト"),
+            "通知なし時のプレースホルダーが含まれない: {s}"
+        );
     }
 
     #[test]
@@ -560,7 +681,10 @@ mod tests {
         let event = NewEvent {
             reminders: Some(EventReminders {
                 use_default: false,
-                overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 10 }]),
+                overrides: Some(vec![EventReminderOverride {
+                    method: "popup".to_string(),
+                    minutes: 10,
+                }]),
             }),
             ..base_new_event()
         };
@@ -577,7 +701,10 @@ mod tests {
         let event = UpdateEvent {
             reminders: Some(EventReminders {
                 use_default: false,
-                overrides: Some(vec![EventReminderOverride { method: "popup".to_string(), minutes: 30 }]),
+                overrides: Some(vec![EventReminderOverride {
+                    method: "popup".to_string(),
+                    minutes: 30,
+                }]),
             }),
             ..base_update_event()
         };
@@ -635,10 +762,18 @@ mod tests {
     #[test]
     fn test_dry_run_update_event_none_fields_show_unchanged() {
         // title=None → "(変更なし)" 表示
-        let event = UpdateEvent { title: None, start: None, end: None, ..base_update_event() };
+        let event = UpdateEvent {
+            title: None,
+            start: None,
+            end: None,
+            ..base_update_event()
+        };
         let mut buf = Vec::new();
         write_update_event_dry_run(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("(変更なし)"), "未変更プレースホルダーが含まれない: {s}");
+        assert!(
+            s.contains("(変更なし)"),
+            "未変更プレースホルダーが含まれない: {s}"
+        );
     }
 }

@@ -5,8 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use crate::ai::client::AiClient;
 use crate::ai::types::AiEventTarget;
 use crate::cli_mapper::{
-    naive_date_to_utc_end, naive_date_to_utc_start, AddCommandInput, CliMapper,
-    UpdateCommandInput,
+    AddCommandInput, CliMapper, UpdateCommandInput, naive_date_to_utc_end, naive_date_to_utc_start,
 };
 use crate::config::Config;
 use crate::domain::{EventQuery, EventStart, EventSummary};
@@ -160,7 +159,11 @@ where
                 EventStart::Date(d) => (*d, 0u8, 0u32),
                 EventStart::DateTime(dt) => {
                     let local = dt.with_timezone(&Local);
-                    (local.date_naive(), 1, local.time().num_seconds_from_midnight())
+                    (
+                        local.date_naive(),
+                        1,
+                        local.time().num_seconds_from_midnight(),
+                    )
                 }
             });
             write_events(out, &all_events, false)?;
@@ -227,7 +230,10 @@ pub fn search_range(
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), GcalError> {
     if let Some(hint) = date_hint {
         let range = parse_date_expr(hint, today)?;
-        Ok((naive_date_to_utc_start(range.from)?, naive_date_to_utc_end(range.to)?))
+        Ok((
+            naive_date_to_utc_start(range.from)?,
+            naive_date_to_utc_end(range.to)?,
+        ))
     } else {
         Ok((
             naive_date_to_utc_start(today)?,
@@ -245,7 +251,11 @@ pub async fn fetch_events<CAL: CalendarClient>(
 ) -> Result<Vec<(String, EventSummary)>, GcalError> {
     let mut all_events = Vec::new();
     for cal_id in calendar_ids {
-        let query = EventQuery { calendar_id: cal_id.clone(), time_min, time_max };
+        let query = EventQuery {
+            calendar_id: cal_id.clone(),
+            time_min,
+            time_max,
+        };
         let events = client.list_events(query).await?;
         for e in events {
             all_events.push((cal_id.clone(), e));
@@ -261,9 +271,10 @@ pub fn format_candidate_list(events: &[(String, EventSummary)], matched: &[usize
         let (_, e) = &events[idx];
         let date_str = match &e.start {
             EventStart::Date(d) => d.format("%Y/%m/%d").to_string(),
-            EventStart::DateTime(dt) => {
-                dt.with_timezone(&Local).format("%Y/%m/%d %H:%M").to_string()
-            }
+            EventStart::DateTime(dt) => dt
+                .with_timezone(&Local)
+                .format("%Y/%m/%d %H:%M")
+                .to_string(),
         };
         result.push_str(&format!("  {}. {} {}\n", num + 1, date_str, e.summary));
     }
@@ -279,7 +290,9 @@ mod tests {
 
     use crate::ai::types::{AiEventParameters, AiEventTarget, AiOperationIntent};
     use crate::config::Config;
-    use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent};
+    use crate::domain::{
+        CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent,
+    };
     use crate::error::GcalError;
     use crate::ports::CalendarClient;
 
@@ -322,7 +335,9 @@ mod tests {
 
     #[async_trait]
     impl CalendarClient for FakeCalendarClient {
-        async fn list_calendars(&self) -> Result<Vec<CalendarSummary>, GcalError> { Ok(vec![]) }
+        async fn list_calendars(&self) -> Result<Vec<CalendarSummary>, GcalError> {
+            Ok(vec![])
+        }
         async fn list_events(&self, _: EventQuery) -> Result<Vec<EventSummary>, GcalError> {
             Ok(self.events.clone())
         }
@@ -336,12 +351,17 @@ mod tests {
             Ok(())
         }
         async fn delete_event(&self, calendar_id: &str, event_id: &str) -> Result<(), GcalError> {
-            self.deleted_ids.lock().unwrap().push((calendar_id.to_string(), event_id.to_string()));
+            self.deleted_ids
+                .lock()
+                .unwrap()
+                .push((calendar_id.to_string(), event_id.to_string()));
             Ok(())
         }
     }
 
-    fn today() -> NaiveDate { NaiveDate::from_ymd_opt(2026, 3, 10).unwrap() }
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()
+    }
 
     fn make_event(id: &str, summary: &str, date: NaiveDate) -> EventSummary {
         EventSummary {
@@ -365,7 +385,10 @@ mod tests {
     }
 
     fn add_intent() -> AiOperationIntent {
-        AiOperationIntent { operation: "add".to_string(), target: None }
+        AiOperationIntent {
+            operation: "add".to_string(),
+            target: None,
+        }
     }
 
     fn update_intent(title: &str, date: &str) -> AiOperationIntent {
@@ -380,9 +403,7 @@ mod tests {
     }
 
     fn config_with_primary() -> Config {
-        let mut c = Config::default();
-        c.calendars = std::collections::HashMap::new();
-        c
+        Config::default()
     }
 
     // --- dispatch_prompt_delete のテスト ---
@@ -390,9 +411,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_prompt_delete_single_match_deletes_event() {
         let event_date = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
-        let fake = FakeCalendarClient::new(vec![
-            make_event("evt-001", "定例MTG", event_date),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event("evt-001", "定例MTG", event_date)]);
         let deleted = fake.deleted_ids.clone();
         let ai = StubAiClient {
             intent: delete_intent("定例MTG", "2026/3/10"),
@@ -401,9 +420,16 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_delete(
-            &fake, &ai, &config_with_primary(), today(),
-            "定例MTGを削除して", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "定例MTGを削除して",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("削除しました"), "output: {output}");
@@ -416,9 +442,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_prompt_delete_no_match_prints_message() {
         let event_date = NaiveDate::from_ymd_opt(2026, 3, 11).unwrap();
-        let fake = FakeCalendarClient::new(vec![
-            make_event("evt-001", "ランチ", event_date),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event("evt-001", "ランチ", event_date)]);
         let deleted = fake.deleted_ids.clone();
         let ai = StubAiClient {
             intent: delete_intent("定例MTG", "2026/3/10"),
@@ -427,12 +451,22 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_delete(
-            &fake, &ai, &config_with_primary(), today(),
-            "定例MTGを削除して", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "定例MTGを削除して",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
-        assert!(output.contains("候補イベントが見つかりませんでした"), "output: {output}");
+        assert!(
+            output.contains("候補イベントが見つかりませんでした"),
+            "output: {output}"
+        );
         assert!(deleted.lock().unwrap().is_empty());
     }
 
@@ -450,9 +484,15 @@ mod tests {
 
         let mut out = Vec::new();
         let result = dispatch_prompt_delete(
-            &fake, &ai, &config_with_primary(), today(),
-            "定例MTGを削除して", false, &mut out,
-        ).await;
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "定例MTGを削除して",
+            false,
+            &mut out,
+        )
+        .await;
 
         assert!(result.is_err());
     }
@@ -476,9 +516,16 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "明日14時から新規会議を追加して", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "明日14時から新規会議を追加して",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("作成しました"), "output: {output}");
@@ -491,9 +538,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_prompt_events_delete_removes_event() {
         let d = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
-        let fake = FakeCalendarClient::new(vec![
-            make_event("evt-del", "朝会", d),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event("evt-del", "朝会", d)]);
         let deleted = fake.deleted_ids.clone();
         let ai = StubAiClient {
             intent: delete_intent("朝会", "2026/3/10"),
@@ -502,9 +547,16 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "今日の朝会を削除して", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "今日の朝会を削除して",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("削除しました"), "output: {output}");
@@ -517,9 +569,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_prompt_events_update_modifies_event() {
         let d = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
-        let fake = FakeCalendarClient::new(vec![
-            make_event("evt-upd", "朝会", d),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event("evt-upd", "朝会", d)]);
         let updated = fake.updated_events.clone();
         let ai = StubAiClient {
             intent: update_intent("朝会", "2026/3/10"),
@@ -534,9 +584,16 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "今日の朝会を10時に変更して", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "今日の朝会を10時に変更して",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("更新しました"), "output: {output}");
@@ -550,15 +607,24 @@ mod tests {
     async fn test_dispatch_prompt_events_unknown_operation_returns_error() {
         let fake = FakeCalendarClient::new(vec![]);
         let ai = StubAiClient {
-            intent: AiOperationIntent { operation: "unknown".to_string(), target: None },
+            intent: AiOperationIntent {
+                operation: "unknown".to_string(),
+                target: None,
+            },
             params: AiEventParameters::default(),
         };
 
         let mut out = Vec::new();
         let result = dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "??", true, &mut out,
-        ).await;
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "??",
+            true,
+            &mut out,
+        )
+        .await;
 
         assert!(result.is_err());
     }
@@ -566,9 +632,7 @@ mod tests {
     #[tokio::test]
     async fn test_dispatch_prompt_events_no_match_prints_message() {
         let d = NaiveDate::from_ymd_opt(2026, 3, 11).unwrap();
-        let fake = FakeCalendarClient::new(vec![
-            make_event("evt-1", "ランチ", d),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event("evt-1", "ランチ", d)]);
         let ai = StubAiClient {
             intent: delete_intent("存在しない会議", "2026/3/10"),
             params: AiEventParameters::default(),
@@ -576,25 +640,39 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "...", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "...",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
-        assert!(output.contains("候補イベントが見つかりませんでした"), "output: {output}");
+        assert!(
+            output.contains("候補イベントが見つかりませんでした"),
+            "output: {output}"
+        );
     }
 
     // --- fetch_events のテスト ---
 
     #[tokio::test]
     async fn test_fetch_events_collects_with_calendar_id() {
-        let fake = FakeCalendarClient::new(vec![
-            make_event("e1", "朝会", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-        ]);
+        let fake = FakeCalendarClient::new(vec![make_event(
+            "e1",
+            "朝会",
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        )]);
         let time_min = Utc.with_ymd_and_hms(2026, 3, 10, 0, 0, 0).unwrap();
         let time_max = Utc.with_ymd_and_hms(2026, 3, 11, 0, 0, 0).unwrap();
 
-        let result = fetch_events(&fake, &["primary".to_string()], time_min, time_max).await.unwrap();
+        let result = fetch_events(&fake, &["primary".to_string()], time_min, time_max)
+            .await
+            .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "primary");
         assert_eq!(result[0].1.id, "e1");
@@ -627,9 +705,16 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "今日の予定を見せて", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "今日の予定を見せて",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("朝会"), "output: {output}");
@@ -646,12 +731,22 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "今日の予定を見せて", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "今日の予定を見せて",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
-        assert!(output.contains("イベントが見つかりません"), "output: {output}");
+        assert!(
+            output.contains("イベントが見つかりません"),
+            "output: {output}"
+        );
     }
 
     #[tokio::test]
@@ -675,12 +770,22 @@ mod tests {
 
         let mut out = Vec::new();
         dispatch_prompt_events(
-            &fake, &ai, &config_with_primary(), today(),
-            "今日のMTGを見せて", true, &mut out,
-        ).await.unwrap();
+            &fake,
+            &ai,
+            &config_with_primary(),
+            today(),
+            "今日のMTGを見せて",
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
 
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains("定例MTG"), "output: {output}");
-        assert!(!output.contains("ランチ"), "ランチが表示されるべきでない: {output}");
+        assert!(
+            !output.contains("ランチ"),
+            "ランチが表示されるべきでない: {output}"
+        );
     }
 }

@@ -4,7 +4,10 @@ use iana_time_zone;
 
 use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent};
 use crate::error::GcalError;
-use crate::gcal_api::models::{CalendarListResponse, CreateEventRequest, CreateEventResponse, EventListResponse, EventTimeSpec, PatchEventRequest};
+use crate::gcal_api::models::{
+    CalendarListResponse, CreateEventRequest, CreateEventResponse, EventListResponse,
+    EventTimeSpec, PatchEventRequest,
+};
 use crate::ports::{CalendarClient, TokenProvider};
 
 const DEFAULT_BASE_URL: &str = "https://www.googleapis.com/calendar/v3";
@@ -41,7 +44,11 @@ impl<T: TokenProvider> GoogleCalendarClient<T> {
     }
 
     /// テスト用: base_url を差し替えられるコンストラクタ
-    pub fn with_base_url(http: reqwest::Client, token_provider: T, base_url: impl Into<String>) -> Self {
+    pub fn with_base_url(
+        http: reqwest::Client,
+        token_provider: T,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             http,
             base_url: base_url.into(),
@@ -56,12 +63,7 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
         let token = self.token_provider.access_token().await?;
         let url = format!("{}/users/me/calendarList", self.base_url);
 
-        let resp = self
-            .http
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await?;
+        let resp = self.http.get(&url).bearer_auth(&token).send().await?;
 
         let resp = check_response_status(resp).await?;
         let body: CalendarListResponse = resp.json().await?;
@@ -105,7 +107,9 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
 
         for entry in body.items.unwrap_or_default() {
             let id = entry.id.unwrap_or_default();
-            let summary = entry.summary.unwrap_or_else(|| "(タイトルなし)".to_string());
+            let summary = entry
+                .summary
+                .unwrap_or_else(|| "(タイトルなし)".to_string());
 
             let start = match entry.start {
                 Some(s) => {
@@ -115,8 +119,9 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                             .with_timezone(&chrono::Utc);
                         EventStart::DateTime(dt)
                     } else if let Some(d_str) = s.date {
-                        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d")
-                            .map_err(|e| GcalError::ConfigError(format!("日付パースエラー: {e}")))?;
+                        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d").map_err(|e| {
+                            GcalError::ConfigError(format!("日付パースエラー: {e}"))
+                        })?;
                         EventStart::Date(d)
                     } else {
                         continue; // 開始日時がないイベントはスキップ
@@ -133,8 +138,9 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
                             .with_timezone(&chrono::Utc);
                         Some(EventStart::DateTime(dt))
                     } else if let Some(d_str) = e.date {
-                        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d")
-                            .map_err(|e| GcalError::ConfigError(format!("日付パースエラー: {e}")))?;
+                        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d").map_err(|e| {
+                            GcalError::ConfigError(format!("日付パースエラー: {e}"))
+                        })?;
                         Some(EventStart::Date(d))
                     } else {
                         None
@@ -144,7 +150,13 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
             };
 
             let location = entry.location;
-            events.push(EventSummary { id, summary, start, end, location });
+            events.push(EventSummary {
+                id,
+                summary,
+                start,
+                end,
+                location,
+            });
         }
 
         Ok(events)
@@ -221,14 +233,12 @@ impl<T: TokenProvider> CalendarClient for GoogleCalendarClient<T> {
 
     async fn delete_event(&self, calendar_id: &str, event_id: &str) -> Result<(), GcalError> {
         let token = self.token_provider.access_token().await?;
-        let url = format!("{}/calendars/{}/events/{}", self.base_url, calendar_id, event_id);
+        let url = format!(
+            "{}/calendars/{}/events/{}",
+            self.base_url, calendar_id, event_id
+        );
 
-        let resp = self
-            .http
-            .delete(&url)
-            .bearer_auth(&token)
-            .send()
-            .await?;
+        let resp = self.http.delete(&url).bearer_auth(&token).send().await?;
 
         check_response_status(resp).await?;
 
@@ -322,7 +332,10 @@ mod tests {
 
         let client = make_client(&server.uri());
         let result = client.list_calendars().await;
-        assert!(matches!(result, Err(GcalError::ApiError { status: 401, .. })));
+        assert!(matches!(
+            result,
+            Err(GcalError::ApiError { status: 401, .. })
+        ));
     }
 
     // --- list_events のテスト ---
@@ -555,7 +568,10 @@ mod tests {
             location: None,
         };
         let result = client.create_event(event).await;
-        assert!(matches!(result, Err(GcalError::ApiError { status: 401, .. })));
+        assert!(matches!(
+            result,
+            Err(GcalError::ApiError { status: 401, .. })
+        ));
     }
 
     #[tokio::test]
@@ -586,7 +602,10 @@ mod tests {
             location: None,
         };
         let result = client.create_event(event).await;
-        assert!(matches!(result, Err(GcalError::ApiError { status: 400, .. })));
+        assert!(matches!(
+            result,
+            Err(GcalError::ApiError { status: 400, .. })
+        ));
     }
 
     // --- update_event のテスト ---
@@ -676,7 +695,10 @@ mod tests {
             location: None,
         };
         let result = client.update_event(event).await;
-        assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));
+        assert!(matches!(
+            result,
+            Err(GcalError::ApiError { status: 404, .. })
+        ));
     }
 
     // --- delete_event のテスト ---
@@ -693,7 +715,10 @@ mod tests {
             .await;
 
         let client = make_client(&server.uri());
-        client.delete_event("primary", "event-del-123").await.unwrap();
+        client
+            .delete_event("primary", "event-del-123")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -710,6 +735,9 @@ mod tests {
 
         let client = make_client(&server.uri());
         let result = client.delete_event("primary", "no-such-event").await;
-        assert!(matches!(result, Err(GcalError::ApiError { status: 404, .. })));
+        assert!(matches!(
+            result,
+            Err(GcalError::ApiError { status: 404, .. })
+        ));
     }
 }

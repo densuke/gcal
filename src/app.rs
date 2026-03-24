@@ -37,7 +37,9 @@ impl<CAL: CalendarClient> App<CAL> {
         event_id: &str,
         out: &mut W,
     ) -> Result<(), GcalError> {
-        self.calendar_client.delete_event(calendar_id, event_id).await?;
+        self.calendar_client
+            .delete_event(calendar_id, event_id)
+            .await?;
         writeln!(out, "削除しました (ID: {})", event_id)?;
         Ok(())
     }
@@ -87,7 +89,11 @@ fn event_sort_key(start: &EventStart) -> (NaiveDate, u8, u32) {
         EventStart::Date(d) => (*d, 0, 0),
         EventStart::DateTime(dt) => {
             let local = dt.with_timezone(&Local);
-            (local.date_naive(), 1, local.time().num_seconds_from_midnight())
+            (
+                local.date_naive(),
+                1,
+                local.time().num_seconds_from_midnight(),
+            )
         }
     }
 }
@@ -98,7 +104,9 @@ mod tests {
     use async_trait::async_trait;
     use chrono::{NaiveDate, TimeZone, Utc};
 
-    use crate::domain::{CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent};
+    use crate::domain::{
+        CalendarSummary, EventQuery, EventStart, EventSummary, NewEvent, UpdateEvent,
+    };
     use crate::error::GcalError;
     use crate::ports::CalendarClient;
     use std::sync::{Arc, Mutex};
@@ -146,16 +154,28 @@ mod tests {
         }
     }
 
-    fn time_min() -> DateTime<Utc> { Utc.with_ymd_and_hms(2026, 2, 24, 0, 0, 0).unwrap() }
-    fn time_max() -> DateTime<Utc> { Utc.with_ymd_and_hms(2026, 3,  3, 23, 59, 59).unwrap() }
+    fn time_min() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 2, 24, 0, 0, 0).unwrap()
+    }
+    fn time_max() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, 3, 23, 59, 59).unwrap()
+    }
 
     #[tokio::test]
     async fn test_handle_calendars_prints_names() {
         let app = App {
             calendar_client: FakeCalendarClient::new(
                 vec![
-                    CalendarSummary { id: "primary".into(), summary: "My Calendar".into(), primary: true },
-                    CalendarSummary { id: "work@example.com".into(), summary: "Work".into(), primary: false },
+                    CalendarSummary {
+                        id: "primary".into(),
+                        summary: "My Calendar".into(),
+                        primary: true,
+                    },
+                    CalendarSummary {
+                        id: "work@example.com".into(),
+                        summary: "Work".into(),
+                        primary: false,
+                    },
                 ],
                 vec![],
             ),
@@ -195,7 +215,15 @@ mod tests {
         };
 
         let mut out = Vec::new();
-        app.handle_events(&["primary".to_string()], time_min(), time_max(), false, &mut out).await.unwrap();
+        app.handle_events(
+            &["primary".to_string()],
+            time_min(),
+            time_max(),
+            false,
+            &mut out,
+        )
+        .await
+        .unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("朝会"));
@@ -212,37 +240,60 @@ mod tests {
     impl FakeMultiCalendarClient {
         fn new(map: Vec<(&str, Vec<EventSummary>)>) -> Self {
             Self {
-                events_by_calendar: map.into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
+                events_by_calendar: map.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
             }
         }
     }
 
     #[async_trait]
     impl CalendarClient for FakeMultiCalendarClient {
-        async fn list_calendars(&self) -> Result<Vec<CalendarSummary>, GcalError> { Ok(vec![]) }
-        async fn list_events(&self, query: EventQuery) -> Result<Vec<EventSummary>, GcalError> {
-            Ok(self.events_by_calendar.get(&query.calendar_id).cloned().unwrap_or_default())
+        async fn list_calendars(&self) -> Result<Vec<CalendarSummary>, GcalError> {
+            Ok(vec![])
         }
-        async fn create_event(&self, _: NewEvent) -> Result<String, GcalError> { Ok("id".into()) }
-        async fn update_event(&self, _: UpdateEvent) -> Result<(), GcalError> { Ok(()) }
-        async fn delete_event(&self, _: &str, _: &str) -> Result<(), GcalError> { Ok(()) }
+        async fn list_events(&self, query: EventQuery) -> Result<Vec<EventSummary>, GcalError> {
+            Ok(self
+                .events_by_calendar
+                .get(&query.calendar_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+        async fn create_event(&self, _: NewEvent) -> Result<String, GcalError> {
+            Ok("id".into())
+        }
+        async fn update_event(&self, _: UpdateEvent) -> Result<(), GcalError> {
+            Ok(())
+        }
+        async fn delete_event(&self, _: &str, _: &str) -> Result<(), GcalError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
     async fn test_handle_events_multiple_calendars_sorted_by_time() {
         // 2カレンダーのイベントが時間順にマージされること
         let work_events = vec![
-            EventSummary { id: "w1".into(), summary: "朝会".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 1, 0, 0).unwrap()), end: None, location: None },
-            EventSummary { id: "w2".into(), summary: "週次MTG".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 5, 0, 0).unwrap()), end: None, location: None },
+            EventSummary {
+                id: "w1".into(),
+                summary: "朝会".into(),
+                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 1, 0, 0).unwrap()),
+                end: None,
+                location: None,
+            },
+            EventSummary {
+                id: "w2".into(),
+                summary: "週次MTG".into(),
+                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 5, 0, 0).unwrap()),
+                end: None,
+                location: None,
+            },
         ];
-        let personal_events = vec![
-            EventSummary { id: "p1".into(), summary: "ランチ".into(),
-                start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 3, 0, 0).unwrap()), end: None, location: None },
-        ];
+        let personal_events = vec![EventSummary {
+            id: "p1".into(),
+            summary: "ランチ".into(),
+            start: EventStart::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 3, 0, 0).unwrap()),
+            end: None,
+            location: None,
+        }];
 
         let app = App {
             calendar_client: FakeMultiCalendarClient::new(vec![
@@ -253,7 +304,9 @@ mod tests {
 
         let mut out = Vec::new();
         let ids = vec!["work".to_string(), "personal".to_string()];
-        app.handle_events(&ids, time_min(), time_max(), false, &mut out).await.unwrap();
+        app.handle_events(&ids, time_min(), time_max(), false, &mut out)
+            .await
+            .unwrap();
         let s = String::from_utf8(out).unwrap();
 
         // 全イベントが出力されること
@@ -262,9 +315,9 @@ mod tests {
         assert!(s.contains("週次MTG"), "週次MTGが含まれない: {s}");
 
         // 時間順: 朝会(01:00) < ランチ(03:00) < 週次MTG(05:00)
-        let pos_朝会   = s.find("朝会").unwrap();
+        let pos_朝会 = s.find("朝会").unwrap();
         let pos_ランチ = s.find("ランチ").unwrap();
-        let pos_mtg    = s.find("週次MTG").unwrap();
+        let pos_mtg = s.find("週次MTG").unwrap();
         assert!(pos_朝会 < pos_ランチ, "朝会がランチより後に出力された");
         assert!(pos_ランチ < pos_mtg, "ランチが週次MTGより後に出力された");
     }
@@ -272,15 +325,14 @@ mod tests {
     #[tokio::test]
     async fn test_handle_events_multiple_calendars_empty() {
         let app = App {
-            calendar_client: FakeMultiCalendarClient::new(vec![
-                ("cal1", vec![]),
-                ("cal2", vec![]),
-            ]),
+            calendar_client: FakeMultiCalendarClient::new(vec![("cal1", vec![]), ("cal2", vec![])]),
         };
 
         let mut out = Vec::new();
         let ids = vec!["cal1".to_string(), "cal2".to_string()];
-        app.handle_events(&ids, time_min(), time_max(), false, &mut out).await.unwrap();
+        app.handle_events(&ids, time_min(), time_max(), false, &mut out)
+            .await
+            .unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("イベントが見つかりません"));
     }
@@ -291,23 +343,47 @@ mod tests {
         // JST (UTC+9) では 08:00 JST = 前日 23:00 UTC になるため、
         // UTC ソートだと終日イベントより前になってしまうバグの回帰テスト
         use chrono::Local;
-        let local_08_00 = Local.with_ymd_and_hms(2026, 2, 25, 8, 0, 0).unwrap().with_timezone(&Utc);
+        let local_08_00 = Local
+            .with_ymd_and_hms(2026, 2, 25, 8, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
         let events = vec![
-            EventSummary { id: "t".into(), summary: "朝会".into(),
-                start: EventStart::DateTime(local_08_00), end: None, location: None },
-            EventSummary { id: "d".into(), summary: "終日行事".into(),
-                start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap()), end: None, location: None },
+            EventSummary {
+                id: "t".into(),
+                summary: "朝会".into(),
+                start: EventStart::DateTime(local_08_00),
+                end: None,
+                location: None,
+            },
+            EventSummary {
+                id: "d".into(),
+                summary: "終日行事".into(),
+                start: EventStart::Date(NaiveDate::from_ymd_opt(2026, 2, 25).unwrap()),
+                end: None,
+                location: None,
+            },
         ];
         let app = App {
             calendar_client: FakeCalendarClient::new(vec![], events),
         };
         let mut out = Vec::new();
-        app.handle_events(&["primary".to_string()], time_min(), time_max(), false, &mut out).await.unwrap();
+        app.handle_events(
+            &["primary".to_string()],
+            time_min(),
+            time_max(),
+            false,
+            &mut out,
+        )
+        .await
+        .unwrap();
         let s = String::from_utf8(out).unwrap();
 
         let pos_allday = s.find("終日行事").unwrap();
-        let pos_timed  = s.find("朝会").unwrap();
-        assert!(pos_allday < pos_timed, "終日イベントが時刻指定イベントより後に出力された:\n{s}");
+        let pos_timed = s.find("朝会").unwrap();
+        assert!(
+            pos_allday < pos_timed,
+            "終日イベントが時刻指定イベントより後に出力された:\n{s}"
+        );
     }
 
     #[tokio::test]
@@ -331,7 +407,9 @@ mod tests {
 
         let client = FakeCalendarClient::new(vec![], vec![]);
         let created = client.created_events.clone();
-        let app = App { calendar_client: client };
+        let app = App {
+            calendar_client: client,
+        };
 
         let start = Local.with_ymd_and_hms(2026, 3, 19, 10, 0, 0).unwrap();
         let end = Local.with_ymd_and_hms(2026, 3, 19, 11, 0, 0).unwrap();
@@ -365,7 +443,9 @@ mod tests {
     async fn test_handle_update_event_prints_confirmation() {
         let client = FakeCalendarClient::new(vec![], vec![]);
         let updated = client.updated_events.clone();
-        let app = App { calendar_client: client };
+        let app = App {
+            calendar_client: client,
+        };
 
         let event = UpdateEvent {
             event_id: "evt-abc123".to_string(),
@@ -397,10 +477,14 @@ mod tests {
     async fn test_handle_delete_event_prints_confirmation() {
         let client = FakeCalendarClient::new(vec![], vec![]);
         let deleted = client.deleted_ids.clone();
-        let app = App { calendar_client: client };
+        let app = App {
+            calendar_client: client,
+        };
 
         let mut out = Vec::new();
-        app.handle_delete_event("primary", "evt-del-456", &mut out).await.unwrap();
+        app.handle_delete_event("primary", "evt-del-456", &mut out)
+            .await
+            .unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("削除しました"));

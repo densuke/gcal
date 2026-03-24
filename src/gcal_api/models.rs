@@ -15,7 +15,6 @@ pub struct EventReminders {
     pub overrides: Option<Vec<EventReminderOverride>>,
 }
 
-
 /// カレンダーリスト API レスポンス
 #[derive(Debug, Deserialize)]
 pub struct CalendarListResponse {

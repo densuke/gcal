@@ -17,7 +17,10 @@ pub fn parse_reminders(
                 overrides: Some(vec![]),
             }));
         } else {
-            return Err(GcalError::ConfigError(format!("不明なremindersプリセット: {}", preset)));
+            return Err(GcalError::ConfigError(format!(
+                "不明なremindersプリセット: {}",
+                preset
+            )));
         }
     }
 
@@ -26,11 +29,14 @@ pub fn parse_reminders(
         for item in list {
             let parts: Vec<&str> = item.split(':').collect();
             if parts.len() != 2 {
-                return Err(GcalError::ConfigError(format!("無効なreminder指定: {}", item)));
+                return Err(GcalError::ConfigError(format!(
+                    "無効なreminder指定: {}",
+                    item
+                )));
             }
             let method = parts[0].to_string();
             let time_str = parts[1];
-            
+
             let minutes = if let Some(m) = strip_suffix_u64(time_str, "m") {
                 m as i32
             } else if let Some(h) = strip_suffix_u64(time_str, "h") {
@@ -38,7 +44,10 @@ pub fn parse_reminders(
             } else if let Some(d) = strip_suffix_u64(time_str, "d") {
                 (d * 24 * 60) as i32
             } else {
-                return Err(GcalError::ConfigError(format!("無効な時間指定: {}", time_str)));
+                return Err(GcalError::ConfigError(format!(
+                    "無効な時間指定: {}",
+                    time_str
+                )));
             };
 
             overrides.push(crate::gcal_api::models::EventReminderOverride { method, minutes });

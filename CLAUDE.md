@@ -100,3 +100,10 @@ DEBUG=false
 - Never commit to main directly
 - PRs require review
 - All tests must pass before merge
+
+## セットアップ (初回クローン後に実行)
+
+```bash
+# pre-commit フックを有効化 (cargo fmt チェック)
+git config core.hooksPath .githooks
+```

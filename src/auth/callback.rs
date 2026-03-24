@@ -59,7 +59,8 @@ impl AuthCodeReceiver for LoopbackReceiver {
 
         // ブラウザに成功レスポンスを返す（writer を別スコープで扱う）
         {
-            let body = "<html><body><h1>認証完了</h1><p>このタブを閉じてください。</p></body></html>";
+            let body =
+                "<html><body><h1>認証完了</h1><p>このタブを閉じてください。</p></body></html>";
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -78,7 +79,9 @@ fn parse_callback_from_request_line(line: &str) -> Result<OAuthCallback, GcalErr
     // "GET /callback?code=xxx&state=yyy HTTP/1.1"
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 2 {
-        return Err(GcalError::AuthError("無効なコールバックリクエスト".to_string()));
+        return Err(GcalError::AuthError(
+            "無効なコールバックリクエスト".to_string(),
+        ));
     }
 
     let path_and_query = parts[1];
@@ -256,7 +259,10 @@ mod tests {
 
         assert_eq!(cb.code, "loopback_code");
         assert_eq!(cb.state, "loopback_state");
-        assert!(response.contains("HTTP/1.1 200 OK"), "レスポンス: {response}");
+        assert!(
+            response.contains("HTTP/1.1 200 OK"),
+            "レスポンス: {response}"
+        );
         assert!(response.contains("認証完了"), "レスポンス: {response}");
     }
 

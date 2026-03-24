@@ -1,5 +1,5 @@
-use chrono::Duration;
 use crate::error::GcalError;
+use chrono::Duration;
 
 /// "+1h", "+30m", "+1h30m", "+90m" などの相対時間を Duration に変換する
 ///
@@ -11,7 +11,9 @@ pub fn parse_duration_str(s: &str) -> Result<Duration, GcalError> {
         ))
     })?;
     if rest.is_empty() {
-        return Err(GcalError::ConfigError(format!("相対時間の値がありません: '{s}'")));
+        return Err(GcalError::ConfigError(format!(
+            "相対時間の値がありません: '{s}'"
+        )));
     }
 
     let mut hours: i64 = 0;
@@ -20,9 +22,9 @@ pub fn parse_duration_str(s: &str) -> Result<Duration, GcalError> {
 
     if let Some(h_pos) = remaining.find('h') {
         let h_str = &remaining[..h_pos];
-        hours = h_str.parse::<i64>().map_err(|_| {
-            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
-        })?;
+        hours = h_str
+            .parse::<i64>()
+            .map_err(|_| GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'")))?;
         remaining = &remaining[h_pos + 1..];
     }
 
@@ -32,9 +34,9 @@ pub fn parse_duration_str(s: &str) -> Result<Duration, GcalError> {
                 "相対時間の形式が不正です: '{s}'\n例: \"+1h\", \"+30m\", \"+1h30m\""
             ))
         })?;
-        minutes = m_str.parse::<i64>().map_err(|_| {
-            GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'"))
-        })?;
+        minutes = m_str
+            .parse::<i64>()
+            .map_err(|_| GcalError::ConfigError(format!("相対時間の形式が不正です: '{s}'")))?;
     }
 
     Ok(Duration::hours(hours) + Duration::minutes(minutes))

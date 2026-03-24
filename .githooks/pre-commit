@@ -1,0 +1,31 @@
+#!/bin/sh
+# pre-commit hook: cargo fmt チェック
+# セットアップ: git config core.hooksPath .githooks
+
+echo ">>> cargo fmt チェック中..."
+
+# ステージング済みの内容だけをチェックするため、未ステージの変更を一時退避
+STASHED=0
+if ! git diff --quiet; then
+    git stash push --quiet --keep-index
+    STASHED=1
+fi
+
+RESULT=0
+if ! cargo fmt --all -- --check; then
+    RESULT=1
+fi
+
+# 退避した変更を戻す
+if [ "$STASHED" -eq 1 ]; then
+    git stash pop --quiet
+fi
+
+if [ $RESULT -ne 0 ]; then
+    echo ""
+    echo "[ERROR] フォーマットエラーがあります。以下を実行してから再コミットしてください:"
+    echo "  cargo fmt --all"
+    exit 1
+fi
+
+echo ">>> フォーマット OK"

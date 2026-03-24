@@ -248,9 +248,19 @@ mod tests {
     #[test]
     fn test_cli_add_repeat_args() {
         let cli = Cli::try_parse_from([
-            "gcal", "add", "Test Event",
-            "--repeat", "weekly", "--every", "2", "--on", "mon,wed", "--until", "2026-12-31",
-        ]).unwrap();
+            "gcal",
+            "add",
+            "Test Event",
+            "--repeat",
+            "weekly",
+            "--every",
+            "2",
+            "--on",
+            "mon,wed",
+            "--until",
+            "2026-12-31",
+        ])
+        .unwrap();
         if let Some(Commands::Add { recurrence, .. }) = cli.command {
             assert_eq!(recurrence.repeat.as_deref(), Some("weekly"));
             assert_eq!(recurrence.every, Some(2));
@@ -264,11 +274,20 @@ mod tests {
     #[test]
     fn test_cli_add_reminder_args() {
         let cli = Cli::try_parse_from([
-            "gcal", "add", "Test Event",
-            "--reminder", "popup:10m", "--reminder", "email:1d",
-        ]).unwrap();
+            "gcal",
+            "add",
+            "Test Event",
+            "--reminder",
+            "popup:10m",
+            "--reminder",
+            "email:1d",
+        ])
+        .unwrap();
         if let Some(Commands::Add { reminder_args, .. }) = cli.command {
-            assert_eq!(reminder_args.reminder, Some(vec!["popup:10m".to_string(), "email:1d".to_string()]));
+            assert_eq!(
+                reminder_args.reminder,
+                Some(vec!["popup:10m".to_string(), "email:1d".to_string()])
+            );
             assert_eq!(reminder_args.reminders, None);
         } else {
             panic!("Expected Add command");
@@ -277,7 +296,8 @@ mod tests {
 
     #[test]
     fn test_cli_add_reminders_preset() {
-        let cli = Cli::try_parse_from(["gcal", "add", "Test Event", "--reminders", "default"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["gcal", "add", "Test Event", "--reminders", "default"]).unwrap();
         if let Some(Commands::Add { reminder_args, .. }) = cli.command {
             assert_eq!(reminder_args.reminder, None);
             assert_eq!(reminder_args.reminders.as_deref(), Some("default"));
@@ -289,10 +309,21 @@ mod tests {
     #[test]
     fn test_cli_update_clear_flags() {
         let cli = Cli::try_parse_from([
-            "gcal", "update", "evt_id",
-            "--clear-repeat", "--clear-reminders", "--clear-location",
-        ]).unwrap();
-        if let Some(Commands::Update { clear_repeat, clear_reminders, clear_location, .. }) = cli.command {
+            "gcal",
+            "update",
+            "evt_id",
+            "--clear-repeat",
+            "--clear-reminders",
+            "--clear-location",
+        ])
+        .unwrap();
+        if let Some(Commands::Update {
+            clear_repeat,
+            clear_reminders,
+            clear_location,
+            ..
+        }) = cli.command
+        {
             assert!(clear_repeat);
             assert!(clear_reminders);
             assert!(clear_location);
@@ -375,7 +406,10 @@ mod tests {
     #[test]
     fn test_cli_delete_force() {
         let cli = Cli::try_parse_from(["gcal", "delete", "evt_id", "-f"]).unwrap();
-        if let Some(Commands::Delete { force, calendar, .. }) = cli.command {
+        if let Some(Commands::Delete {
+            force, calendar, ..
+        }) = cli.command
+        {
             assert!(force);
             assert_eq!(calendar, "primary");
         } else {
@@ -386,7 +420,10 @@ mod tests {
     #[test]
     fn test_cli_delete_by_id() {
         let cli = Cli::try_parse_from(["gcal", "delete", "evt_abc123"]).unwrap();
-        if let Some(Commands::Delete { event_id, prompt, .. }) = cli.command {
+        if let Some(Commands::Delete {
+            event_id, prompt, ..
+        }) = cli.command
+        {
             assert_eq!(event_id, Some("evt_abc123".to_string()));
             assert_eq!(prompt, None);
         } else {
@@ -397,7 +434,10 @@ mod tests {
     #[test]
     fn test_cli_delete_by_prompt() {
         let cli = Cli::try_parse_from(["gcal", "delete", "-p", "明日の会議を削除"]).unwrap();
-        if let Some(Commands::Delete { event_id, prompt, .. }) = cli.command {
+        if let Some(Commands::Delete {
+            event_id, prompt, ..
+        }) = cli.command
+        {
             assert_eq!(event_id, None);
             assert_eq!(prompt.as_deref(), Some("明日の会議を削除"));
         } else {
@@ -409,7 +449,10 @@ mod tests {
     fn test_cli_delete_requires_id_or_prompt() {
         // どちらも指定しない場合はエラー
         let result = Cli::try_parse_from(["gcal", "delete"]);
-        assert!(result.is_err(), "event_id か --prompt のどちらかが必須のはず");
+        assert!(
+            result.is_err(),
+            "event_id か --prompt のどちらかが必須のはず"
+        );
     }
 
     #[test]
@@ -449,9 +492,17 @@ mod tests {
     #[test]
     fn test_cli_calendars_alias_subcommand() {
         let cli = Cli::try_parse_from([
-            "gcal", "calendars", "alias", "仕事", "abc@group.calendar.google.com",
-        ]).unwrap();
-        if let Some(Commands::Calendars { sub: Some(CalendarSubcommands::Alias { name, calendar_id }) }) = cli.command {
+            "gcal",
+            "calendars",
+            "alias",
+            "仕事",
+            "abc@group.calendar.google.com",
+        ])
+        .unwrap();
+        if let Some(Commands::Calendars {
+            sub: Some(CalendarSubcommands::Alias { name, calendar_id }),
+        }) = cli.command
+        {
             assert_eq!(name, "仕事");
             assert_eq!(calendar_id, "abc@group.calendar.google.com");
         } else {
@@ -462,7 +513,13 @@ mod tests {
     #[test]
     fn test_cli_add_date_conflicts_with_start() {
         let result = Cli::try_parse_from([
-            "gcal", "add", "MTG", "--date", "今日 14:00", "--start", "今日 14:00",
+            "gcal",
+            "add",
+            "MTG",
+            "--date",
+            "今日 14:00",
+            "--start",
+            "今日 14:00",
         ]);
         assert!(result.is_err(), "date と start は排他のはず");
     }
