@@ -18,12 +18,11 @@ fn validate_token_endpoint(url_str: &str) -> Result<(), GcalError> {
     let parsed = url::Url::parse(url_str)
         .map_err(|_| GcalError::AuthError(format!("不正な token_endpoint URL: '{url_str}'")))?;
 
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| GcalError::AuthError(format!("token_endpoint にホストがありません: '{url_str}'")))?;
+    let host = parsed.host_str().ok_or_else(|| {
+        GcalError::AuthError(format!("token_endpoint にホストがありません: '{url_str}'"))
+    })?;
 
-    if parsed.scheme() == "https"
-        && (host == "googleapis.com" || host.ends_with(".googleapis.com"))
+    if parsed.scheme() == "https" && (host == "googleapis.com" || host.ends_with(".googleapis.com"))
     {
         return Ok(());
     }
@@ -129,10 +128,7 @@ impl<S: TokenStore, C: Clock> RefreshingTokenProvider<S, C> {
 #[async_trait]
 impl<S: TokenStore, C: Clock> TokenProvider for RefreshingTokenProvider<S, C> {
     async fn access_token(&self) -> Result<String, GcalError> {
-        let tokens = self
-            .store
-            .load_tokens()?
-            .ok_or(GcalError::NotInitialized)?;
+        let tokens = self.store.load_tokens()?.ok_or(GcalError::NotInitialized)?;
 
         // 有効期限のチェック（30秒のバッファを持たせる）
         // expires_at が None（有効期限不明）の場合はリフレッシュを試みる。

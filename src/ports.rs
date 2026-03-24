@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use crate::domain::{CalendarSummary, EventQuery, EventSummary, NewEvent, OAuthCallback, StoredTokens, UpdateEvent};
+use crate::domain::{
+    CalendarSummary, EventQuery, EventSummary, NewEvent, OAuthCallback, StoredTokens, UpdateEvent,
+};
 use crate::error::GcalError;
 
 /// 現在時刻を提供するトレイト（テスト時に固定時刻を注入するため）

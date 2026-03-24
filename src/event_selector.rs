@@ -14,9 +14,10 @@ pub fn filter_by_target(
     target: &AiEventTarget,
     today: NaiveDate,
 ) -> Vec<usize> {
-    let date_range = target.date_hint.as_deref().and_then(|hint| {
-        parse_date_expr(hint, today).ok()
-    });
+    let date_range = target
+        .date_hint
+        .as_deref()
+        .and_then(|hint| parse_date_expr(hint, today).ok());
 
     events
         .iter()
@@ -103,13 +104,21 @@ mod tests {
     }
 
     fn target_none() -> AiEventTarget {
-        AiEventTarget { title_hint: None, date_hint: None, calendar: None }
+        AiEventTarget {
+            title_hint: None,
+            date_hint: None,
+            calendar: None,
+        }
     }
 
     #[test]
     fn test_filter_title_hint_matches_substring() {
         let events = vec![
-            make_event("1", "定例MTG", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
+            make_event(
+                "1",
+                "定例MTG",
+                NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            ),
             make_event("2", "ランチ", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
         ];
         let result = filter_by_target(&events, &target_title("MTG"), today());
@@ -118,18 +127,22 @@ mod tests {
 
     #[test]
     fn test_filter_title_hint_no_match() {
-        let events = vec![
-            make_event("1", "ランチ", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-        ];
+        let events = vec![make_event(
+            "1",
+            "ランチ",
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        )];
         let result = filter_by_target(&events, &target_title("MTG"), today());
         assert!(result.is_empty());
     }
 
     #[test]
     fn test_filter_title_hint_case_insensitive() {
-        let events = vec![
-            make_event("1", "Daily MTG", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-        ];
+        let events = vec![make_event(
+            "1",
+            "Daily MTG",
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        )];
         let result = filter_by_target(&events, &target_title("mtg"), today());
         assert_eq!(result, vec![0]);
     }
@@ -150,7 +163,11 @@ mod tests {
         // "今日" (today=2026/3/10) → 3/10 のイベント
         let events = vec![
             make_event("1", "朝会", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-            make_event("2", "明日の会議", NaiveDate::from_ymd_opt(2026, 3, 11).unwrap()),
+            make_event(
+                "2",
+                "明日の会議",
+                NaiveDate::from_ymd_opt(2026, 3, 11).unwrap(),
+            ),
         ];
         let result = filter_by_target(&events, &target_date("今日"), today());
         assert_eq!(result, vec![0]);
@@ -171,8 +188,16 @@ mod tests {
     fn test_filter_both_hints_and_logic() {
         // title "MTG" AND date "2026/3/11" → 両方満たすもの
         let events = vec![
-            make_event("1", "定例MTG", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-            make_event("2", "定例MTG", NaiveDate::from_ymd_opt(2026, 3, 11).unwrap()),
+            make_event(
+                "1",
+                "定例MTG",
+                NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            ),
+            make_event(
+                "2",
+                "定例MTG",
+                NaiveDate::from_ymd_opt(2026, 3, 11).unwrap(),
+            ),
             make_event("3", "ランチ", NaiveDate::from_ymd_opt(2026, 3, 11).unwrap()),
         ];
         let result = filter_by_target(&events, &target_both("MTG", "2026/3/11"), today());
@@ -209,8 +234,16 @@ mod tests {
     #[test]
     fn test_filter_multiple_matches() {
         let events = vec![
-            make_event("1", "朝のMTG", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-            make_event("2", "夕のMTG", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
+            make_event(
+                "1",
+                "朝のMTG",
+                NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            ),
+            make_event(
+                "2",
+                "夕のMTG",
+                NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            ),
             make_event("3", "ランチ", NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
         ];
         let result = filter_by_target(&events, &target_title("MTG"), today());

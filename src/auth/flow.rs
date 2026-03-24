@@ -56,9 +56,7 @@ pub async fn run_init(
 
     use oauth2::TokenResponse;
     let access_token = token_result.access_token().secret().clone();
-    let refresh_token = token_result
-        .refresh_token()
-        .map(|t| t.secret().clone());
+    let refresh_token = token_result.refresh_token().map(|t| t.secret().clone());
     let expires_at = token_result
         .expires_in()
         .map(|d| chrono::Utc::now() + chrono::Duration::from_std(d).unwrap_or_default());
@@ -95,21 +93,35 @@ mod tests {
 
     struct NoopBrowser;
     impl BrowserOpener for NoopBrowser {
-        fn open(&self, _url: &str) -> Result<(), GcalError> { Ok(()) }
+        fn open(&self, _url: &str) -> Result<(), GcalError> {
+            Ok(())
+        }
     }
 
-    struct FixedReceiver { code: &'static str, state: &'static str }
+    struct FixedReceiver {
+        code: &'static str,
+        state: &'static str,
+    }
     impl AuthCodeReceiver for FixedReceiver {
-        fn redirect_uri(&self) -> String { "http://localhost:12345".to_string() }
+        fn redirect_uri(&self) -> String {
+            "http://localhost:12345".to_string()
+        }
         fn receive_code(&self) -> Result<OAuthCallback, GcalError> {
-            Ok(OAuthCallback { code: self.code.to_string(), state: self.state.to_string() })
+            Ok(OAuthCallback {
+                code: self.code.to_string(),
+                state: self.state.to_string(),
+            })
         }
     }
 
     struct NoopStore;
     impl TokenStore for NoopStore {
-        fn load_tokens(&self) -> Result<Option<StoredTokens>, GcalError> { Ok(None) }
-        fn save_tokens(&self, _: &StoredTokens) -> Result<(), GcalError> { Ok(()) }
+        fn load_tokens(&self) -> Result<Option<StoredTokens>, GcalError> {
+            Ok(None)
+        }
+        fn save_tokens(&self, _: &StoredTokens) -> Result<(), GcalError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -119,13 +131,17 @@ mod tests {
         let config_path = dir.path().join("config.toml");
         let result = run_init(
             &NoopBrowser,
-            &FixedReceiver { code: "any-code", state: "wrong-state" },
+            &FixedReceiver {
+                code: "any-code",
+                state: "wrong-state",
+            },
             &NoopStore,
             &config_path,
             "client_id".to_string(),
             "client_secret".to_string(),
             AiConfig::default(),
-        ).await;
+        )
+        .await;
         assert!(matches!(result, Err(GcalError::OAuthStateMismatch)));
     }
 }

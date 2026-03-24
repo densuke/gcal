@@ -1,7 +1,7 @@
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Weekday};
 use crate::error::GcalError;
 use crate::parser::duration::parse_duration_str;
-use crate::parser::util::{normalize, take_number, strip_suffix_u64};
+use crate::parser::util::{normalize, strip_suffix_u64, take_number};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Weekday};
 
 /// 日付範囲（from 以上 to 以下、両端含む）
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +12,10 @@ pub struct DateRange {
 
 impl DateRange {
     pub fn single(date: NaiveDate) -> Self {
-        Self { from: date, to: date }
+        Self {
+            from: date,
+            to: date,
+        }
     }
 }
 
@@ -115,7 +118,11 @@ fn days_until_sunday(date: NaiveDate) -> u32 {
 }
 
 fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
-    let (next_year, next_month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
     NaiveDate::from_ymd_opt(next_year, next_month, 1).unwrap() - Duration::days(1)
 }
 
@@ -206,7 +213,10 @@ pub fn resolve_event_range(
             )));
         }
 
-        return Ok(DateRange { from: from_date, to: to_date });
+        return Ok(DateRange {
+            from: from_date,
+            to: to_date,
+        });
     }
 
     // デフォルト: 今日から N 日間
@@ -375,37 +385,58 @@ mod tests {
 
     #[test]
     fn test_today() {
-        assert_eq!(parse_date_expr("今日", today()).unwrap(), DateRange::single(date(2026, 2, 24)));
+        assert_eq!(
+            parse_date_expr("今日", today()).unwrap(),
+            DateRange::single(date(2026, 2, 24))
+        );
     }
 
     #[test]
     fn test_today_english() {
-        assert_eq!(parse_date_expr("today", today()).unwrap(), DateRange::single(date(2026, 2, 24)));
+        assert_eq!(
+            parse_date_expr("today", today()).unwrap(),
+            DateRange::single(date(2026, 2, 24))
+        );
     }
 
     #[test]
     fn test_tomorrow() {
-        assert_eq!(parse_date_expr("明日", today()).unwrap(), DateRange::single(date(2026, 2, 25)));
+        assert_eq!(
+            parse_date_expr("明日", today()).unwrap(),
+            DateRange::single(date(2026, 2, 25))
+        );
     }
 
     #[test]
     fn test_tomorrow_english() {
-        assert_eq!(parse_date_expr("tomorrow", today()).unwrap(), DateRange::single(date(2026, 2, 25)));
+        assert_eq!(
+            parse_date_expr("tomorrow", today()).unwrap(),
+            DateRange::single(date(2026, 2, 25))
+        );
     }
 
     #[test]
     fn test_day_after_tomorrow() {
-        assert_eq!(parse_date_expr("明後日", today()).unwrap(), DateRange::single(date(2026, 2, 26)));
+        assert_eq!(
+            parse_date_expr("明後日", today()).unwrap(),
+            DateRange::single(date(2026, 2, 26))
+        );
     }
 
     #[test]
     fn test_yesterday() {
-        assert_eq!(parse_date_expr("昨日", today()).unwrap(), DateRange::single(date(2026, 2, 23)));
+        assert_eq!(
+            parse_date_expr("昨日", today()).unwrap(),
+            DateRange::single(date(2026, 2, 23))
+        );
     }
 
     #[test]
     fn test_yesterday_english() {
-        assert_eq!(parse_date_expr("yesterday", today()).unwrap(), DateRange::single(date(2026, 2, 23)));
+        assert_eq!(
+            parse_date_expr("yesterday", today()).unwrap(),
+            DateRange::single(date(2026, 2, 23))
+        );
     }
 
     // --- 今週・来週 ---
@@ -513,60 +544,93 @@ mod tests {
     // --- N日後 / N週間後 ---
     #[test]
     fn test_n_days_later() {
-        assert_eq!(parse_date_expr("3日後", today()).unwrap(), DateRange::single(date(2026, 2, 27)));
+        assert_eq!(
+            parse_date_expr("3日後", today()).unwrap(),
+            DateRange::single(date(2026, 2, 27))
+        );
     }
 
     #[test]
     fn test_n_days_later_large() {
-        assert_eq!(parse_date_expr("10日後", today()).unwrap(), DateRange::single(date(2026, 3, 6)));
+        assert_eq!(
+            parse_date_expr("10日後", today()).unwrap(),
+            DateRange::single(date(2026, 3, 6))
+        );
     }
 
     #[test]
     fn test_n_weeks_later() {
-        assert_eq!(parse_date_expr("2週間後", today()).unwrap(), DateRange::single(date(2026, 3, 10)));
+        assert_eq!(
+            parse_date_expr("2週間後", today()).unwrap(),
+            DateRange::single(date(2026, 3, 10))
+        );
     }
 
     #[test]
     fn test_n_weeks_later_short() {
-        assert_eq!(parse_date_expr("1週後", today()).unwrap(), DateRange::single(date(2026, 3, 3)));
+        assert_eq!(
+            parse_date_expr("1週後", today()).unwrap(),
+            DateRange::single(date(2026, 3, 3))
+        );
     }
 
     // --- M/D 形式 ---
     #[test]
     fn test_month_day_slash() {
-        assert_eq!(parse_date_expr("3/19", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
+        assert_eq!(
+            parse_date_expr("3/19", today()).unwrap(),
+            DateRange::single(date(2026, 3, 19))
+        );
     }
 
     #[test]
     fn test_month_day_japanese() {
-        assert_eq!(parse_date_expr("3月19日", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
+        assert_eq!(
+            parse_date_expr("3月19日", today()).unwrap(),
+            DateRange::single(date(2026, 3, 19))
+        );
     }
 
     // --- YYYY/M/D 形式 ---
     #[test]
     fn test_full_date_slash() {
-        assert_eq!(parse_date_expr("2027/1/5", today()).unwrap(), DateRange::single(date(2027, 1, 5)));
+        assert_eq!(
+            parse_date_expr("2027/1/5", today()).unwrap(),
+            DateRange::single(date(2027, 1, 5))
+        );
     }
 
     #[test]
     fn test_full_date_japanese() {
-        assert_eq!(parse_date_expr("2027年1月5日", today()).unwrap(), DateRange::single(date(2027, 1, 5)));
+        assert_eq!(
+            parse_date_expr("2027年1月5日", today()).unwrap(),
+            DateRange::single(date(2027, 1, 5))
+        );
     }
 
     // --- 全角入力の正規化 ---
     #[test]
     fn test_fullwidth_month_day() {
-        assert_eq!(parse_date_expr("３月１９日", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
+        assert_eq!(
+            parse_date_expr("３月１９日", today()).unwrap(),
+            DateRange::single(date(2026, 3, 19))
+        );
     }
 
     #[test]
     fn test_fullwidth_slash() {
-        assert_eq!(parse_date_expr("３／１９", today()).unwrap(), DateRange::single(date(2026, 3, 19)));
+        assert_eq!(
+            parse_date_expr("３／１９", today()).unwrap(),
+            DateRange::single(date(2026, 3, 19))
+        );
     }
 
     #[test]
     fn test_trim_whitespace() {
-        assert_eq!(parse_date_expr("  今日  ", today()).unwrap(), DateRange::single(date(2026, 2, 24)));
+        assert_eq!(
+            parse_date_expr("  今日  ", today()).unwrap(),
+            DateRange::single(date(2026, 2, 24))
+        );
     }
 
     // --- エラーケース ---
@@ -765,7 +829,7 @@ mod tests {
     }
 
     #[test]
-        fn test_range_no_space_returns_error() {
+    fn test_range_no_space_returns_error() {
         assert!(parse_datetime_range_expr("9:30", today()).is_err());
     }
 

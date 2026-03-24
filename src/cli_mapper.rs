@@ -343,23 +343,24 @@ fn resolve_ai_reminder_item(
     start: Option<DateTime<Local>>,
 ) -> Result<String, GcalError> {
     if let Some((method, after_colon)) = item.split_once(':')
-        && let Some(time_str) = after_colon.strip_prefix("prev-") {
-            let start_dt = start.ok_or_else(|| {
-                GcalError::ConfigError("「前日HH時」リマインダーには開始日時が必要です".to_string())
-            })?;
-            if let Some((hh_str, mm_str)) = time_str.split_once(':') {
-                let hh: u32 = hh_str
-                    .parse()
-                    .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
-                let mm: u32 = mm_str
-                    .parse()
-                    .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
-                let start_mins = start_dt.hour() * 60 + start_dt.minute();
-                let prev_mins = hh * 60 + mm;
-                let total = start_mins + (24 * 60 - prev_mins);
-                return Ok(format!("{}:{}m", method, total));
-            }
+        && let Some(time_str) = after_colon.strip_prefix("prev-")
+    {
+        let start_dt = start.ok_or_else(|| {
+            GcalError::ConfigError("「前日HH時」リマインダーには開始日時が必要です".to_string())
+        })?;
+        if let Some((hh_str, mm_str)) = time_str.split_once(':') {
+            let hh: u32 = hh_str
+                .parse()
+                .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
+            let mm: u32 = mm_str
+                .parse()
+                .map_err(|_| GcalError::ConfigError(format!("無効な時刻指定: {}", time_str)))?;
+            let start_mins = start_dt.hour() * 60 + start_dt.minute();
+            let prev_mins = hh * 60 + mm;
+            let total = start_mins + (24 * 60 - prev_mins);
+            return Ok(format!("{}:{}m", method, total));
         }
+    }
     Ok(item.to_string())
 }
 

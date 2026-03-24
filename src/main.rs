@@ -1,22 +1,22 @@
 use chrono::Local;
 use clap::Parser;
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 
 use gcal::ai::client::OllamaClient;
 use gcal::ai::types::{AiEventParameters, AiEventTarget};
-use gcal::output::{write_new_event_dry_run, write_update_event_dry_run};
 use gcal::alias_handler::{handle_list_aliases, handle_remove_alias, handle_set_alias};
 use gcal::app::App;
 use gcal::auth::callback::{LoopbackReceiver, ManualReceiver};
 use gcal::auth::flow::run_init;
 use gcal::auth::provider::RefreshingTokenProvider;
 use gcal::cli::{CalendarSubcommands, Cli, Commands};
-use gcal::cli_mapper::{AddCommandInput, UpdateCommandInput, CliMapper};
+use gcal::cli_mapper::{AddCommandInput, CliMapper, UpdateCommandInput};
 use gcal::config::{AiConfig, Config, FileTokenStore};
 use gcal::domain::EventSummary;
 use gcal::error::GcalError;
 use gcal::event_selector;
 use gcal::gcal_api::client::GoogleCalendarClient;
+use gcal::output::{write_new_event_dry_run, write_update_event_dry_run};
 use gcal::ports::{SystemBrowserOpener, SystemClock};
 use gcal::prompt_flow;
 
@@ -42,11 +42,17 @@ async fn run() -> Result<(), GcalError> {
     }
     // 2. XDG準拠: ~/.config/gcal/config.toml
     if let Some(home) = dirs::home_dir() {
-        candidate_paths.push(("[XDG]     ".to_string(), home.join(".config").join("gcal").join("config.toml")));
+        candidate_paths.push((
+            "[XDG]     ".to_string(),
+            home.join(".config").join("gcal").join("config.toml"),
+        ));
     }
     // 3. OS依存の標準の場所: (macOSなら ~/Library/Application Support/gcal/config.toml)
     if let Some(os_config) = dirs::config_dir() {
-        candidate_paths.push(("[OS-Spec] ".to_string(), os_config.join("gcal").join("config.toml")));
+        candidate_paths.push((
+            "[OS-Spec] ".to_string(),
+            os_config.join("gcal").join("config.toml"),
+        ));
     }
     // 4. CLI引数で指定されたパス（あれば最強）
     // NOTE: セキュリティ上の理由からカレントディレクトリ (./.gcal.toml) の自動探索は廃止。
@@ -71,12 +77,18 @@ async fn run() -> Result<(), GcalError> {
             match Config::load(&path) {
                 Ok(other) => {
                     config.merge(other);
-                    load_info.push(format!("{}. {} {:?} (読み込み完了/上書き)", priority, label, path));
+                    load_info.push(format!(
+                        "{}. {} {:?} (読み込み完了/上書き)",
+                        priority, label, path
+                    ));
                     last_loaded_path = Some(path.clone());
                     priority += 1;
                 }
                 Err(e) => {
-                    load_info.push(format!("{}. {} {:?} (エラー: {})", priority, label, path, e));
+                    load_info.push(format!(
+                        "{}. {} {:?} (エラー: {})",
+                        priority, label, path, e
+                    ));
                     priority += 1;
                 }
             }
@@ -89,9 +101,9 @@ async fn run() -> Result<(), GcalError> {
 
     // 最後に書き込み等で使う「メインのパス」を決定
     // CLI引数 > 最後に読み込んだパス > デフォルトパス
-    let config_path = cli.config.clone()
-        .or(last_loaded_path)
-        .unwrap_or_else(|| Config::default_path().unwrap_or_else(|_| std::path::PathBuf::from("config.toml")));
+    let config_path = cli.config.clone().or(last_loaded_path).unwrap_or_else(|| {
+        Config::default_path().unwrap_or_else(|_| std::path::PathBuf::from("config.toml"))
+    });
 
     if cli.verbose || cli.show_config {
         for info in &load_info {
@@ -125,43 +137,86 @@ async fn run() -> Result<(), GcalError> {
             if manual {
                 let receiver = ManualReceiver::new(std::io::BufReader::new(std::io::stdin()));
                 println!("認証後にリダイレクトされた URL を貼り付けてください:");
-                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret, ai_config).await?;
+                run_init(
+                    &SystemBrowserOpener,
+                    &receiver,
+                    &store,
+                    &config_path,
+                    client_id,
+                    client_secret,
+                    ai_config,
+                )
+                .await?;
             } else {
                 let receiver = LoopbackReceiver::bind()?;
-                run_init(&SystemBrowserOpener, &receiver, &store, &config_path, client_id, client_secret, ai_config).await?;
+                run_init(
+                    &SystemBrowserOpener,
+                    &receiver,
+                    &store,
+                    &config_path,
+                    client_id,
+                    client_secret,
+                    ai_config,
+                )
+                .await?;
             }
         }
 
-        Commands::Calendars { sub } => {
-            match sub {
-                None => {
-                    let app = build_app(&config_path)?;
-                    let mut out = std::io::stdout();
-                    app.handle_calendars(&mut out).await?;
-                }
-                Some(CalendarSubcommands::Alias { name, calendar_id }) => {
-                    let mut out = std::io::stdout();
-                    handle_set_alias(&config_path, &name, &calendar_id, &mut out)?;
-                }
-                Some(CalendarSubcommands::Aliases) => {
-                    let mut out = std::io::stdout();
-                    handle_list_aliases(&config_path, &mut out)?;
-                }
-                Some(CalendarSubcommands::Unalias { name }) => {
-                    let mut out = std::io::stdout();
-                    handle_remove_alias(&config_path, &name, &mut out)?;
-                }
+        Commands::Calendars { sub } => match sub {
+            None => {
+                let app = build_app(&config_path)?;
+                let mut out = std::io::stdout();
+                app.handle_calendars(&mut out).await?;
             }
-        }
+            Some(CalendarSubcommands::Alias { name, calendar_id }) => {
+                let mut out = std::io::stdout();
+                handle_set_alias(&config_path, &name, &calendar_id, &mut out)?;
+            }
+            Some(CalendarSubcommands::Aliases) => {
+                let mut out = std::io::stdout();
+                handle_list_aliases(&config_path, &mut out)?;
+            }
+            Some(CalendarSubcommands::Unalias { name }) => {
+                let mut out = std::io::stdout();
+                handle_remove_alias(&config_path, &name, &mut out)?;
+            }
+        },
 
-        Commands::Add { title, date, start, end, location, calendar, recurrence, reminder_args, ai_args } => {
+        Commands::Add {
+            title,
+            date,
+            start,
+            end,
+            location,
+            calendar,
+            recurrence,
+            reminder_args,
+            ai_args,
+        } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai_args.prompt.or(ai_args.ai), ai_args.ai_url, ai_args.ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(
+                ai_args.prompt.or(ai_args.ai),
+                ai_args.ai_url,
+                ai_args.ai_model,
+                &config_path,
+            )
+            .await?;
             let used_ai = ai_params.is_some();
-            let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
+            let (calendar_id, calendar_display_name) =
+                resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_add_command(AddCommandInput {
-                title, date, start, end, calendar: calendar_id, calendar_display_name, location, recurrence, reminder_args, today, ai_params
+                title,
+                date,
+                start,
+                end,
+                calendar: calendar_id,
+                calendar_display_name,
+                location,
+                recurrence,
+                reminder_args,
+                today,
+                ai_params,
             })?;
             // AI 使用時は登録内容を表示して確認を求める（--yes でスキップ）
             if used_ai && !ai_args.yes {
@@ -176,14 +231,49 @@ async fn run() -> Result<(), GcalError> {
             app.handle_add_event(event, &mut out).await?;
         }
 
-        Commands::Update { event_id, title, date, start, end, calendar, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, ai_args } => {
+        Commands::Update {
+            event_id,
+            title,
+            date,
+            start,
+            end,
+            calendar,
+            clear_repeat,
+            clear_reminders,
+            clear_location,
+            location,
+            recurrence,
+            reminder_args,
+            ai_args,
+        } => {
             let today = Local::now().date_naive();
-            let ai_params = resolve_ai_params(ai_args.prompt.or(ai_args.ai), ai_args.ai_url, ai_args.ai_model, &config_path).await?;
+            let ai_params = resolve_ai_params(
+                ai_args.prompt.or(ai_args.ai),
+                ai_args.ai_url,
+                ai_args.ai_model,
+                &config_path,
+            )
+            .await?;
             let used_ai = ai_params.is_some();
-            let (calendar_id, calendar_display_name) = resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
+            let (calendar_id, calendar_display_name) =
+                resolve_calendar_from_args(&config_path, calendar, ai_params.as_ref());
 
             let event = CliMapper::map_update_command(UpdateCommandInput {
-                event_id, calendar: calendar_id, calendar_display_name, title, date, start, end, clear_repeat, clear_reminders, clear_location, location, recurrence, reminder_args, today, ai_params
+                event_id,
+                calendar: calendar_id,
+                calendar_display_name,
+                title,
+                date,
+                start,
+                end,
+                clear_repeat,
+                clear_reminders,
+                clear_location,
+                location,
+                recurrence,
+                reminder_args,
+                today,
+                ai_params,
             })?;
             // AI 使用時は更新内容を表示して確認を求める（--yes でスキップ）
             if used_ai && !ai_args.yes {
@@ -198,7 +288,13 @@ async fn run() -> Result<(), GcalError> {
             app.handle_update_event(event, &mut out).await?;
         }
 
-        Commands::Delete { event_id, prompt, ai, force, calendar } => {
+        Commands::Delete {
+            event_id,
+            prompt,
+            ai,
+            force,
+            calendar,
+        } => {
             if let Some(prompt_str) = prompt.or(ai) {
                 // 自然文フロー: 候補イベントを特定して削除
                 dispatch_prompt_delete(prompt_str, force, &config_path).await?;
@@ -210,38 +306,54 @@ async fn run() -> Result<(), GcalError> {
                     && !confirm_or_cancel(&format!(
                         "イベント (ID: {}) を削除しますか? [y/N]: ",
                         id
-                    ))? {
-                        return Ok(());
-                    }
+                    ))?
+                {
+                    return Ok(());
+                }
                 let app = build_app(&config_path)?;
                 let mut out = std::io::stdout();
                 app.handle_delete_event(&calendar_id, &id, &mut out).await?;
             }
         }
 
-        Commands::Events { calendar, calendars, days, date, from, to, ids, prompt, ai_url, ai_model, yes } => {
+        Commands::Events {
+            calendar,
+            calendars,
+            days,
+            date,
+            from,
+            to,
+            ids,
+            prompt,
+            ai_url,
+            ai_model,
+            yes,
+        } => {
             if let Some(prompt_str) = prompt {
                 // CRUD ディスパッチモード: --prompt/-p で操作種別を判断してルーティング
                 dispatch_prompt_events(
-                    prompt_str, ai_url, ai_model, yes,
-                    calendar, calendars,
+                    prompt_str,
+                    ai_url,
+                    ai_model,
+                    yes,
+                    calendar,
+                    calendars,
                     &config_path,
-                ).await?;
+                )
+                .await?;
             } else {
                 // 既存の表示モード
                 let config = Config::load(&config_path).unwrap_or_default();
-                let calendar_ids = config.resolve_event_calendars(
-                    calendar.as_deref(),
-                    calendars.as_deref(),
-                );
+                let calendar_ids =
+                    config.resolve_event_calendars(calendar.as_deref(), calendars.as_deref());
                 let today = Local::now().date_naive();
-                let (time_min, time_max) = CliMapper::map_events_command(
-                    date, from, to, days, today
-                )?;
+                let (time_min, time_max) =
+                    CliMapper::map_events_command(date, from, to, days, today)?;
 
                 let app = build_app(&config_path)?;
                 let mut out = std::io::stdout();
-                app.handle_events(&calendar_ids, time_min, time_max, ids, &mut out).await?;
+                app.handle_events(&calendar_ids, time_min, time_max, ids, &mut out)
+                    .await?;
             }
         }
 
@@ -310,13 +422,13 @@ async fn dispatch_prompt_events(
                 calendar: None,
             });
             let config = Config::load(config_path).unwrap_or_default();
-            let calendar_ids = config.resolve_event_calendars(
-                calendar.as_deref(),
-                calendars.as_deref(),
-            );
-            let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
+            let calendar_ids =
+                config.resolve_event_calendars(calendar.as_deref(), calendars.as_deref());
+            let (time_min, time_max) =
+                prompt_flow::search_range(target.date_hint.as_deref(), today)?;
             let app = build_app(config_path)?;
-            app.handle_events(&calendar_ids, time_min, time_max, false, &mut out).await?;
+            app.handle_events(&calendar_ids, time_min, time_max, false, &mut out)
+                .await?;
         }
 
         op @ ("delete" | "update") => {
@@ -326,16 +438,15 @@ async fn dispatch_prompt_events(
                 calendar: None,
             });
             let config = Config::load(config_path).unwrap_or_default();
-            let calendar_ids = config.resolve_event_calendars(
-                calendar.as_deref(),
-                calendars.as_deref(),
-            );
-            let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
+            let calendar_ids =
+                config.resolve_event_calendars(calendar.as_deref(), calendars.as_deref());
+            let (time_min, time_max) =
+                prompt_flow::search_range(target.date_hint.as_deref(), today)?;
 
             let app = build_app(config_path)?;
-            let all_events = prompt_flow::fetch_events(
-                &app.calendar_client, &calendar_ids, time_min, time_max,
-            ).await?;
+            let all_events =
+                prompt_flow::fetch_events(&app.calendar_client, &calendar_ids, time_min, time_max)
+                    .await?;
             let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
             let matched = event_selector::filter_by_target(&summaries, &target, today);
 
@@ -354,9 +465,10 @@ async fn dispatch_prompt_events(
             if op == "delete" {
                 let (cal_id, event) = &all_events[selected_idx];
                 if !yes
-                    && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
-                        return Ok(());
-                    }
+                    && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))?
+                {
+                    return Ok(());
+                }
                 app.handle_delete_event(cal_id, &event.id, &mut out).await?;
             } else {
                 let (cal_id, selected) = &all_events[selected_idx];
@@ -412,9 +524,8 @@ async fn dispatch_prompt_delete(
     let (time_min, time_max) = prompt_flow::search_range(target.date_hint.as_deref(), today)?;
 
     let app = build_app(config_path)?;
-    let all_events = prompt_flow::fetch_events(
-        &app.calendar_client, &calendar_ids, time_min, time_max,
-    ).await?;
+    let all_events =
+        prompt_flow::fetch_events(&app.calendar_client, &calendar_ids, time_min, time_max).await?;
     let summaries: Vec<EventSummary> = all_events.iter().map(|(_, e)| e.clone()).collect();
     let matched = event_selector::filter_by_target(&summaries, &target, today);
 
@@ -431,10 +542,10 @@ async fn dispatch_prompt_delete(
     };
     let (cal_id, event) = &all_events[selected_idx];
     let mut out = std::io::stdout();
-    if !force
-        && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))? {
-            return Ok(());
-        }
+    if !force && !confirm_or_cancel(&format!("「{}」を削除しますか? [y/N]: ", event.summary))?
+    {
+        return Ok(());
+    }
     app.handle_delete_event(cal_id, &event.id, &mut out).await?;
     Ok(())
 }
@@ -442,9 +553,10 @@ async fn dispatch_prompt_delete(
 /// 候補番号をユーザーから受け取り matched[n-1] を返す。
 fn select_candidate_index(matched: &[usize]) -> Result<usize, GcalError> {
     let answer = prompt(&format!("番号を選択してください (1-{}): ", matched.len()))?;
-    let n: usize = answer.trim().parse().map_err(|_| {
-        GcalError::ConfigError(format!("無効な番号です: '{}'", answer.trim()))
-    })?;
+    let n: usize = answer
+        .trim()
+        .parse()
+        .map_err(|_| GcalError::ConfigError(format!("無効な番号です: '{}'", answer.trim())))?;
     if n < 1 || n > matched.len() {
         return Err(GcalError::ConfigError(format!(
             "1 から {} の番号を入力してください",
@@ -470,9 +582,16 @@ fn resolve_calendar_from_args(
 fn resolve_calendar(config_path: &std::path::Path, input: &str) -> (String, String) {
     let config = Config::load(config_path).unwrap_or_default();
     let resolved = config.resolve_calendar_id(input);
-    if resolved == input && !input.contains('@') && input != "primary" && !config.calendars.is_empty() {
+    if resolved == input
+        && !input.contains('@')
+        && input != "primary"
+        && !config.calendars.is_empty()
+    {
         // TODO: 将来的には「unknown alias → 作成後に別カレンダーへ移動」機能を追加
-        eprintln!("警告: 未知のカレンダーエイリアス '{}' → primary を使用します", input);
+        eprintln!(
+            "警告: 未知のカレンダーエイリアス '{}' → primary を使用します",
+            input
+        );
         eprintln!("      `gcal calendars aliases` でエイリアス一覧を確認できます");
         return ("primary".to_string(), "primary".to_string());
     }
@@ -482,34 +601,46 @@ fn resolve_calendar(config_path: &std::path::Path, input: &str) -> (String, Stri
 /// API クライアントと App を組み立てる
 fn build_app(
     config_path: &std::path::Path,
-) -> Result<App<GoogleCalendarClient<RefreshingTokenProvider<FileTokenStore, SystemClock>>>, GcalError> {
+) -> Result<
+    App<GoogleCalendarClient<RefreshingTokenProvider<FileTokenStore, SystemClock>>>,
+    GcalError,
+> {
     let (client_id, client_secret) = load_credentials(config_path)?;
     let store = FileTokenStore::new(config_path.to_path_buf());
     let token_provider = RefreshingTokenProvider::new(store, SystemClock, client_id, client_secret);
     let http_client = GoogleCalendarClient::new(reqwest::Client::new(), token_provider);
-    Ok(App { calendar_client: http_client })
+    Ok(App {
+        calendar_client: http_client,
+    })
 }
 
 fn load_credentials(config_path: &std::path::Path) -> Result<(String, String), GcalError> {
     let config = Config::load(config_path)?;
-    Ok((config.credentials.client_id, config.credentials.client_secret))
+    Ok((
+        config.credentials.client_id,
+        config.credentials.client_secret,
+    ))
 }
 
 /// `gcal init` 時に使う認証情報を決定する。
 /// 既存の設定ファイルに client_id が残っていれば表示して再利用を選択できる。
 fn resolve_credentials(config_path: &std::path::Path) -> Result<(String, String), GcalError> {
     if let Ok(config) = Config::load(config_path)
-        && !config.credentials.client_id.is_empty() {
-            println!("既存の認証情報が見つかりました:");
-            println!("  Client ID: ********");
-            let answer = prompt("既存の認証情報を使いますか? [Y/n]: ")?;
-            if answer.is_empty() || answer.to_lowercase() == "y" {
-                return Ok((config.credentials.client_id, config.credentials.client_secret));
-            }
+        && !config.credentials.client_id.is_empty()
+    {
+        println!("既存の認証情報が見つかりました:");
+        println!("  Client ID: ********");
+        let answer = prompt("既存の認証情報を使いますか? [Y/n]: ")?;
+        if answer.is_empty() || answer.to_lowercase() == "y" {
+            return Ok((
+                config.credentials.client_id,
+                config.credentials.client_secret,
+            ));
         }
+    }
     let client_id = prompt("Google OAuth2 Client ID: ")?;
-    let client_secret = rpassword::prompt_password("Google OAuth2 Client Secret: ")
-        .map_err(GcalError::IoError)?;
+    let client_secret =
+        rpassword::prompt_password("Google OAuth2 Client Secret: ").map_err(GcalError::IoError)?;
     Ok((client_id, client_secret))
 }
 
@@ -523,12 +654,24 @@ fn resolve_ai_config(config_path: &std::path::Path) -> Result<AiConfig, GcalErro
     println!("\nAI設定 (Ollama):");
 
     let base_url_input = prompt(&format!("  サーバーURL [{}]: ", existing.base_url))?;
-    let base_url = if base_url_input.is_empty() { existing.base_url } else { base_url_input };
+    let base_url = if base_url_input.is_empty() {
+        existing.base_url
+    } else {
+        base_url_input
+    };
 
     let model_input = prompt(&format!("  使用モデル  [{}]: ", existing.model))?;
-    let model = if model_input.is_empty() { existing.model } else { model_input };
+    let model = if model_input.is_empty() {
+        existing.model
+    } else {
+        model_input
+    };
 
-    Ok(AiConfig { base_url, model, enabled: existing.enabled })
+    Ok(AiConfig {
+        base_url,
+        model,
+        enabled: existing.enabled,
+    })
 }
 
 /// `--ai` フラグが指定されていれば Ollama に問い合わせて AiEventParameters を返す
@@ -544,9 +687,7 @@ async fn resolve_ai_params(
     let Some(prompt_str) = ai_prompt else {
         return Ok(None);
     };
-    let ai_config = Config::load(config_path)
-        .map(|c| c.ai)
-        .unwrap_or_default();
+    let ai_config = Config::load(config_path).map(|c| c.ai).unwrap_or_default();
     let base_url = ai_url.unwrap_or(ai_config.base_url);
     let model = ai_model.unwrap_or(ai_config.model);
     let client = OllamaClient::new(base_url, model);
@@ -559,7 +700,9 @@ fn prompt(message: &str) -> Result<String, GcalError> {
     print!("{message}");
     std::io::stdout().flush()?;
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input).map_err(GcalError::IoError)?;
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(GcalError::IoError)?;
     Ok(input.trim().to_string())
 }
 

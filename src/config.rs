@@ -60,9 +60,15 @@ pub const DEFAULT_AI_BASE_URL: &str = "http://localhost:11434";
 pub const DEFAULT_AI_MODEL: &str = "gemma3:4b";
 const DEFAULT_AI_ENABLED: bool = true;
 
-fn default_ai_base_url() -> String { DEFAULT_AI_BASE_URL.to_string() }
-fn default_ai_model() -> String { DEFAULT_AI_MODEL.to_string() }
-fn default_ai_enabled() -> bool { DEFAULT_AI_ENABLED }
+fn default_ai_base_url() -> String {
+    DEFAULT_AI_BASE_URL.to_string()
+}
+fn default_ai_model() -> String {
+    DEFAULT_AI_MODEL.to_string()
+}
+fn default_ai_enabled() -> bool {
+    DEFAULT_AI_ENABLED
+}
 
 impl Default for AiConfig {
     fn default() -> Self {
@@ -108,7 +114,10 @@ impl Config {
     /// カレンダー名/エイリアスを Google カレンダー ID に解決する。
     /// エイリアスが登録されていない場合は入力をそのまま返す（"primary" 等も通る）。
     pub fn resolve_calendar_id(&self, input: &str) -> String {
-        self.calendars.get(input).cloned().unwrap_or_else(|| input.to_string())
+        self.calendars
+            .get(input)
+            .cloned()
+            .unwrap_or_else(|| input.to_string())
     }
 
     /// CLI 引数と設定から events コマンド用カレンダー ID リストを解決する。
@@ -135,7 +144,9 @@ impl Config {
         }
         // config デフォルト
         if !self.events.default_calendars.is_empty() {
-            return self.events.default_calendars
+            return self
+                .events
+                .default_calendars
                 .iter()
                 .map(|s| self.resolve_calendar_id(s))
                 .collect();
@@ -145,8 +156,9 @@ impl Config {
 
     /// デフォルトの設定ファイルパスを返す（~/.config/gcal/config.toml）
     pub fn default_path() -> Result<PathBuf, GcalError> {
-        let dir = dirs::config_dir()
-            .ok_or_else(|| GcalError::ConfigError("設定ディレクトリが見つかりません".to_string()))?;
+        let dir = dirs::config_dir().ok_or_else(|| {
+            GcalError::ConfigError("設定ディレクトリが見つかりません".to_string())
+        })?;
         Ok(dir.join("gcal").join("config.toml"))
     }
 
@@ -174,8 +186,7 @@ impl Config {
 
         let content = std::fs::read_to_string(path)
             .map_err(|e| GcalError::ConfigError(format!("読み込みエラー: {e}")))?;
-        toml::from_str(&content)
-            .map_err(|e| GcalError::ConfigError(format!("パースエラー: {e}")))
+        toml::from_str(&content).map_err(|e| GcalError::ConfigError(format!("パースエラー: {e}")))
     }
 
     /// 設定ファイルに書き込む（親ディレクトリがなければ作成）
@@ -217,13 +228,28 @@ impl Config {
         let mut out = String::new();
         out.push_str("--- Current Configuration ---\n");
         out.push_str("[Credentials]\n");
-        out.push_str(&format!("  Client ID:     {}\n", mask_string(&self.credentials.client_id)));
-        out.push_str(&format!("  Client Secret: {}\n", mask_string(&self.credentials.client_secret)));
+        out.push_str(&format!(
+            "  Client ID:     {}\n",
+            mask_string(&self.credentials.client_id)
+        ));
+        out.push_str(&format!(
+            "  Client Secret: {}\n",
+            mask_string(&self.credentials.client_secret)
+        ));
 
         if let Some(t) = &self.token {
             out.push_str("[Token]\n");
-            out.push_str(&format!("  Access Token:  {}\n", mask_string(&t.access_token)));
-            out.push_str(&format!("  Refresh Token: {}\n", t.refresh_token.as_ref().map(|s| mask_string(s)).unwrap_or_else(|| "None".to_string())));
+            out.push_str(&format!(
+                "  Access Token:  {}\n",
+                mask_string(&t.access_token)
+            ));
+            out.push_str(&format!(
+                "  Refresh Token: {}\n",
+                t.refresh_token
+                    .as_ref()
+                    .map(|s| mask_string(s))
+                    .unwrap_or_else(|| "None".to_string())
+            ));
             out.push_str(&format!("  Expires At:    {:?}\n", t.expires_at));
         } else {
             out.push_str("[Token]\n  Not authenticated\n");
@@ -244,7 +270,10 @@ impl Config {
         }
 
         out.push_str("[Events]\n");
-        out.push_str(&format!("  Default Calendars: {:?}\n", self.events.default_calendars));
+        out.push_str(&format!(
+            "  Default Calendars: {:?}\n",
+            self.events.default_calendars
+        ));
         out.push_str("------------------------------");
         out
     }
@@ -323,8 +352,12 @@ mod tests {
             use std::io::Write as _;
             use std::os::unix::fs::OpenOptionsExt;
             let mut f = std::fs::OpenOptions::new()
-                .create(true).write(true).truncate(true).mode(0o600)
-                .open(path).unwrap();
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(path)
+                .unwrap();
             f.write_all(content.as_bytes()).unwrap();
         }
         #[cfg(not(unix))]
@@ -355,7 +388,10 @@ mod tests {
         // v0.4.0 以前の設定ファイル（[ai] セクションなし）を読んでもデフォルト値が入る
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
+        write_test_config(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        );
         let config = Config::load(&path).unwrap();
         assert_eq!(config.ai.base_url, "http://localhost:11434");
         assert_eq!(config.ai.model, "gemma3:4b");
@@ -413,13 +449,20 @@ mod tests {
         let path = dir.path().join("config.toml");
 
         // 0644 で書き込んだファイルはロードを拒否する
-        std::fs::write(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
         let result = Config::load(&path);
         assert!(result.is_err(), "0644 のファイルはエラーになるべき");
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("パーミッションが不正"), "エラーメッセージに「パーミッションが不正」が含まれるべき: {msg}");
+        assert!(
+            msg.contains("パーミッションが不正"),
+            "エラーメッセージに「パーミッションが不正」が含まれるべき: {msg}"
+        );
     }
 
     #[test]
@@ -427,7 +470,10 @@ mod tests {
     fn test_load_accepts_0600_permissions() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        write_test_config(&path, "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n");
+        write_test_config(
+            &path,
+            "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n",
+        );
         // 0600 で書かれたファイルは正常にロードできる
         assert!(Config::load(&path).is_ok());
     }
@@ -439,7 +485,10 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        write_test_config(&path, "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n");
+        write_test_config(
+            &path,
+            "[credentials]\nclient_id = \"ok\"\nclient_secret = \"s\"\n",
+        );
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o400)).unwrap();
         // 0400（読み取り専用）も許可
         assert!(Config::load(&path).is_ok());
@@ -458,7 +507,10 @@ mod tests {
 
         let meta = std::fs::metadata(&path).unwrap();
         let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "ファイルパーミッションは 0600 であるべき: {mode:o}");
+        assert_eq!(
+            mode, 0o600,
+            "ファイルパーミッションは 0600 であるべき: {mode:o}"
+        );
     }
 
     #[test]
@@ -485,7 +537,10 @@ mod tests {
         };
 
         store.save_tokens(&tokens).unwrap();
-        let loaded = store.load_tokens().unwrap().expect("トークンが存在するはず");
+        let loaded = store
+            .load_tokens()
+            .unwrap()
+            .expect("トークンが存在するはず");
 
         assert_eq!(loaded.access_token, "acc_token_123");
         assert_eq!(loaded.refresh_token.as_deref(), Some("ref_token_456"));
@@ -530,8 +585,14 @@ mod tests {
     #[test]
     fn test_resolve_calendar_known_alias() {
         let mut config = Config::default();
-        config.calendars.insert("仕事".to_string(), "work@group.calendar.google.com".to_string());
-        assert_eq!(config.resolve_calendar_id("仕事"), "work@group.calendar.google.com");
+        config.calendars.insert(
+            "仕事".to_string(),
+            "work@group.calendar.google.com".to_string(),
+        );
+        assert_eq!(
+            config.resolve_calendar_id("仕事"),
+            "work@group.calendar.google.com"
+        );
     }
 
     #[test]
@@ -560,7 +621,10 @@ mod tests {
         // v0.5.x 以前の設定ファイル（[calendars] セクションなし）でも空 HashMap になる
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
+        write_test_config(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        );
         let config = Config::load(&path).unwrap();
         assert!(config.calendars.is_empty());
     }
@@ -570,12 +634,20 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = temp_config_path(&dir);
         let mut config = Config::default();
-        config.credentials = Credentials { client_id: "cid".to_string(), client_secret: "cs".to_string() };
-        config.calendars.insert("仕事".to_string(), "work@google.com".to_string());
+        config.credentials = Credentials {
+            client_id: "cid".to_string(),
+            client_secret: "cs".to_string(),
+        };
+        config
+            .calendars
+            .insert("仕事".to_string(), "work@google.com".to_string());
         config.save(&path).unwrap();
 
         let loaded = Config::load(&path).unwrap();
-        assert_eq!(loaded.calendars.get("仕事").map(|s| s.as_str()), Some("work@google.com"));
+        assert_eq!(
+            loaded.calendars.get("仕事").map(|s| s.as_str()),
+            Some("work@google.com")
+        );
     }
 
     // --- EventsConfig のテスト ---
@@ -590,7 +662,10 @@ mod tests {
         // [events] セクションなしの旧設定ファイルでも空になる（後方互換）
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        write_test_config(&path, "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n");
+        write_test_config(
+            &path,
+            "[credentials]\nclient_id = \"x\"\nclient_secret = \"y\"\n",
+        );
         let config = Config::load(&path).unwrap();
         assert!(config.events.default_calendars.is_empty());
     }
@@ -600,7 +675,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = temp_config_path(&dir);
         let mut config = Config::default();
-        config.credentials = Credentials { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+        config.credentials = Credentials {
+            client_id: "cid".to_string(),
+            client_secret: "cs".to_string(),
+        };
         config.events.default_calendars = vec!["仕事".to_string(), "個人".to_string()];
         config.save(&path).unwrap();
 
@@ -612,8 +690,14 @@ mod tests {
 
     fn config_with_aliases() -> Config {
         let mut config = Config::default();
-        config.calendars.insert("仕事".to_string(), "work@group.calendar.google.com".to_string());
-        config.calendars.insert("個人".to_string(), "personal@group.calendar.google.com".to_string());
+        config.calendars.insert(
+            "仕事".to_string(),
+            "work@group.calendar.google.com".to_string(),
+        );
+        config.calendars.insert(
+            "個人".to_string(),
+            "personal@group.calendar.google.com".to_string(),
+        );
         config
     }
 
@@ -630,10 +714,13 @@ mod tests {
         // --calendars 仕事,個人 → カンマ分割してエイリアス解決
         let config = config_with_aliases();
         let result = config.resolve_event_calendars(None, Some("仕事,個人"));
-        assert_eq!(result, vec![
-            "work@group.calendar.google.com",
-            "personal@group.calendar.google.com",
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                "work@group.calendar.google.com",
+                "personal@group.calendar.google.com",
+            ]
+        );
     }
 
     #[test]
@@ -641,10 +728,13 @@ mod tests {
         // --calendars "仕事, 個人" → trim して解決
         let config = config_with_aliases();
         let result = config.resolve_event_calendars(None, Some("仕事, 個人"));
-        assert_eq!(result, vec![
-            "work@group.calendar.google.com",
-            "personal@group.calendar.google.com",
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                "work@group.calendar.google.com",
+                "personal@group.calendar.google.com",
+            ]
+        );
     }
 
     #[test]
@@ -661,10 +751,13 @@ mod tests {
         let mut config = config_with_aliases();
         config.events.default_calendars = vec!["仕事".to_string(), "個人".to_string()];
         let result = config.resolve_event_calendars(None, None);
-        assert_eq!(result, vec![
-            "work@group.calendar.google.com",
-            "personal@group.calendar.google.com",
-        ]);
+        assert_eq!(
+            result,
+            vec![
+                "work@group.calendar.google.com",
+                "personal@group.calendar.google.com",
+            ]
+        );
     }
 
     #[test]
@@ -687,7 +780,11 @@ mod tests {
     fn test_default_path_returns_ok() {
         // Config::default_path() が Ok を返し gcal/config.toml で終わること
         let path = Config::default_path().expect("default_path() は Ok であるべき");
-        assert!(path.ends_with("gcal/config.toml"), "パスが期待通りでない: {:?}", path);
+        assert!(
+            path.ends_with("gcal/config.toml"),
+            "パスが期待通りでない: {:?}",
+            path
+        );
     }
 
     #[test]
@@ -729,8 +826,14 @@ mod tests {
         };
         let output = config.display_config();
         // 実際の値が出力に含まれないこと
-        assert!(!output.contains("my_client_id_xyz"), "client_id が露出している");
-        assert!(!output.contains("super_secret_abc"), "client_secret が露出している");
+        assert!(
+            !output.contains("my_client_id_xyz"),
+            "client_id が露出している"
+        );
+        assert!(
+            !output.contains("super_secret_abc"),
+            "client_secret が露出している"
+        );
         // マスク文字列が含まれること
         assert!(output.contains("********"));
     }
@@ -750,8 +853,13 @@ mod tests {
             events: Default::default(),
         };
         let output = config.display_config();
-        assert!(!output.contains("access_tok_secret"), "access_token が露出している");
-        assert!(!output.contains("refresh_tok_secret"), "refresh_token が露出している");
+        assert!(
+            !output.contains("access_tok_secret"),
+            "access_token が露出している"
+        );
+        assert!(
+            !output.contains("refresh_tok_secret"),
+            "refresh_token が露出している"
+        );
     }
 }
-

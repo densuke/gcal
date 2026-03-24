@@ -11,7 +11,9 @@ pub fn handle_set_alias<W: Write>(
     out: &mut W,
 ) -> Result<(), GcalError> {
     let mut config = Config::load(config_path).unwrap_or_default();
-    config.calendars.insert(name.to_string(), calendar_id.to_string());
+    config
+        .calendars
+        .insert(name.to_string(), calendar_id.to_string());
     config.save(config_path)?;
     writeln!(out, "エイリアスを設定しました: {} → {}", name, calendar_id)?;
     Ok(())
@@ -45,7 +47,10 @@ pub fn handle_remove_alias<W: Write>(
 ) -> Result<(), GcalError> {
     let mut config = Config::load(config_path).unwrap_or_default();
     if config.calendars.remove(name).is_none() {
-        return Err(GcalError::ConfigError(format!("エイリアス '{}' が見つかりません", name)));
+        return Err(GcalError::ConfigError(format!(
+            "エイリアス '{}' が見つかりません",
+            name
+        )));
     }
     config.save(config_path)?;
     writeln!(out, "エイリアスを削除しました: {}", name)?;
@@ -64,7 +69,10 @@ mod tests {
     fn init_config(path: &std::path::Path) {
         use crate::config::{AiConfig, Config, Credentials};
         let config = Config {
-            credentials: Credentials { client_id: "x".to_string(), client_secret: "y".to_string() },
+            credentials: Credentials {
+                client_id: "x".to_string(),
+                client_secret: "y".to_string(),
+            },
             token: None,
             ai: AiConfig::default(),
             calendars: Default::default(),
@@ -83,7 +91,10 @@ mod tests {
         handle_set_alias(&path, "仕事", "work@google.com", &mut out).unwrap();
 
         let config = crate::config::Config::load(&path).unwrap();
-        assert_eq!(config.calendars.get("仕事").map(|s| s.as_str()), Some("work@google.com"));
+        assert_eq!(
+            config.calendars.get("仕事").map(|s| s.as_str()),
+            Some("work@google.com")
+        );
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("仕事"), "{s}");
         assert!(s.contains("work@google.com"), "{s}");
@@ -99,7 +110,10 @@ mod tests {
         handle_set_alias(&path, "仕事", "new@google.com", &mut Vec::new()).unwrap();
 
         let config = crate::config::Config::load(&path).unwrap();
-        assert_eq!(config.calendars.get("仕事").map(|s| s.as_str()), Some("new@google.com"));
+        assert_eq!(
+            config.calendars.get("仕事").map(|s| s.as_str()),
+            Some("new@google.com")
+        );
     }
 
     #[test]
