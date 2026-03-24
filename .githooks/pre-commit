@@ -1,0 +1,12 @@
+#!/bin/sh
+# pre-commit hook: cargo fmt チェック
+# セットアップ: git config core.hooksPath .githooks
+
+echo ">>> cargo fmt チェック中..."
+if ! cargo fmt --all -- --check; then
+  echo ""
+  echo "[ERROR] フォーマットエラーがあります。以下を実行してから再コミットしてください:"
+  echo "  cargo fmt --all"
+  exit 1
+fi
+echo ">>> フォーマット OK"
