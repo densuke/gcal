@@ -136,14 +136,13 @@ fn parse_full_date(s: &str) -> Option<NaiveDate> {
 }
 
 fn parse_ymd_hyphen(s: &str) -> Option<NaiveDate> {
-    let mut parts = s.split('-');
-    let y = parts.next()?.parse::<i32>().ok()?;
-    let m = parts.next()?.parse::<u32>().ok()?;
-    let d = parts.next()?.parse::<u32>().ok()?;
-    // セグメントが4つ以上あれば無効（例: "2026-04-02-extra"）
-    if parts.next().is_some() {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
         return None;
     }
+    let y = parts[0].parse::<i32>().ok()?;
+    let m = parts[1].parse::<u32>().ok()?;
+    let d = parts[2].parse::<u32>().ok()?;
     NaiveDate::from_ymd_opt(y, m, d)
 }
 
@@ -627,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn test_full_date_iso8601_zero_padded() {
+    fn test_full_date_iso8601_end_of_year() {
         assert_eq!(
             parse_date_expr("2026-12-31", today()).unwrap(),
             DateRange::single(date(2026, 12, 31))
