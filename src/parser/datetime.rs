@@ -60,7 +60,7 @@ pub fn parse_date_expr(input: &str, today: NaiveDate) -> Result<DateRange, GcalE
 
     Err(GcalError::ConfigError(format!(
         "日付の解釈ができません: '{input}'\n\
-         例: 今日, 明日, 来週, 今月, 3/19, 3月19日, 2026/3/19, 3日後, 2週間後"
+         例: 今日, 明日, 来週, 今月, 3/19, 3月19日, 2026/3/19, 2026-04-02, 3日後, 2週間後"
     )))
 }
 
@@ -128,14 +128,31 @@ fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
 
 // --- パースヘルパー ---
 
-/// "YYYY/M/D" または "YYYY年M月D日" を解析
+/// "YYYY/M/D"、"YYYY-MM-DD"、または "YYYY年M月D日" を解析
 fn parse_full_date(s: &str) -> Option<NaiveDate> {
     // YYYY/M/D
     if let Some(d) = parse_ymd_slash(s) {
         return Some(d);
     }
+    // YYYY-MM-DD (ISO 8601)
+    if let Some(d) = parse_ymd_hyphen(s) {
+        return Some(d);
+    }
     // YYYY年M月D日
     parse_ymd_japanese(s)
+}
+
+fn parse_ymd_hyphen(s: &str) -> Option<NaiveDate> {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() == 3 {
+        let y = parts[0].parse::<i32>().ok()?;
+        let m = parts[1].parse::<u32>().ok()?;
+        let d = parts[2].parse::<u32>().ok()?;
+        if y > 31 {
+            return NaiveDate::from_ymd_opt(y, m, d);
+        }
+    }
+    None
 }
 
 fn parse_ymd_slash(s: &str) -> Option<NaiveDate> {
@@ -606,6 +623,28 @@ mod tests {
             parse_date_expr("2027年1月5日", today()).unwrap(),
             DateRange::single(date(2027, 1, 5))
         );
+    }
+
+    // --- YYYY-MM-DD 形式 (ISO 8601) ---
+    #[test]
+    fn test_full_date_iso8601() {
+        assert_eq!(
+            parse_date_expr("2026-04-02", today()).unwrap(),
+            DateRange::single(date(2026, 4, 2))
+        );
+    }
+
+    #[test]
+    fn test_full_date_iso8601_zero_padded() {
+        assert_eq!(
+            parse_date_expr("2026-12-31", today()).unwrap(),
+            DateRange::single(date(2026, 12, 31))
+        );
+    }
+
+    #[test]
+    fn test_full_date_iso8601_invalid_month_returns_error() {
+        assert!(parse_date_expr("2026-13-01", today()).is_err());
     }
 
     // --- 全角入力の正規化 ---
