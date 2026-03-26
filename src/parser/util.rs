@@ -12,13 +12,14 @@ pub(crate) fn take_number(s: &str) -> Option<(&str, u32)> {
     Some((&s[end..], n))
 }
 
-/// 入力を正規化する（全角数字→半角、全角スラッシュ→半角、trim）
+/// 入力を正規化する（全角数字→半角、全角スラッシュ→半角、全角ハイフン→半角、trim）
 pub(crate) fn normalize(s: &str) -> String {
     s.trim()
         .chars()
         .map(|c| match c {
             '０'..='９' => char::from_u32(c as u32 - '０' as u32 + '0' as u32).unwrap(),
             '／' => '/',
+            '－' => '-',
             _ => c,
         })
         .collect()
